@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>r7 Graph</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --void: #06060a;
+      --deep: #0a0a10;
+      --surface: #101018;
+      --elevated: #16161f;
+      --hover: #1c1c28;
+      --border: #2a2a3a;
+      --text-primary: #e4e4ed;
+      --text-secondary: #8888a0;
+      --text-muted: #5a5a70;
+      --accent: #7c3aed;
+    }
+
+    body {
+      background: var(--void);
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    #graph-container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.03) 0%, transparent 70%),
+        linear-gradient(to bottom, var(--void), var(--deep));
+    }
+
+    #graph-container canvas { outline: none; }
+
+    /* Loading overlay */
+    #loading {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--void);
+      z-index: 100;
+      transition: opacity 0.5s;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    #loading span { margin-left: 16px; color: var(--text-secondary); font-size: 14px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Stats bar */
+    #stats {
+      position: absolute;
+      top: 12px; left: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      z-index: 10;
+      display: flex;
+      gap: 16px;
+      backdrop-filter: blur(8px);
+    }
+    #stats .stat-value { color: var(--text-primary); font-weight: 600; }
+
+    /* Legend */
+    #legend {
+      position: absolute;
+      top: 12px; right: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      z-index: 10;
+      max-height: 50vh;
+      overflow-y: auto;
+      backdrop-filter: blur(8px);
+    }
+    #legend h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+      cursor: pointer;
+      opacity: 0.9;
+    }
+    .legend-item:hover { opacity: 1; }
+    .legend-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Detail panel */
+    #detail {
+      position: absolute;
+      bottom: 12px; left: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      z-index: 10;
+      max-width: 480px;
+      max-height: 40vh;
+      overflow-y: auto;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+    #detail.visible { display: block; }
+    #detail h2 {
+      font-size: 14px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+    #detail .meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    #detail .description {
+      color: var(--text-secondary);
+      line-height: 1.5;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #detail .edges-list {
+      margin-top: 8px;
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+    #detail .edge-item {
+      padding: 2px 0;
+      font-size: 11px;
+    }
+    .edge-type { color: var(--accent); font-weight: 500; }
+    .edge-target { color: var(--text-primary); cursor: pointer; }
+    .edge-target:hover { text-decoration: underline; }
+
+    /* Search */
+    #search-container {
+      position: absolute;
+      bottom: 12px; right: 12px;
+      z-index: 10;
+    }
+    #search {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 12px;
+      width: 220px;
+      outline: none;
+    }
+    #search:focus { border-color: var(--accent); }
+    #search::placeholder { color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div id="graph-container"></div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading graph...</span>
+  </div>
+
+  <div id="stats">
+    <div>Nodes: <span class="stat-value" id="node-count">-</span></div>
+    <div>Edges: <span class="stat-value" id="edge-count">-</span></div>
+    <div>Channels: <span class="stat-value" id="channel-count">-</span></div>
+  </div>
+
+  <div id="legend"></div>
+
+  <div id="detail">
+    <h2 id="detail-name"></h2>
+    <div class="meta" id="detail-meta"></div>
+    <div class="description" id="detail-desc"></div>
+    <div class="edges-list" id="detail-edges"></div>
+  </div>
+
+  <div id="search-container">
+    <input id="search" type="text" placeholder="Search nodes..." />
+  </div>
+
+  <!-- Load from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/graphology/0.25.4/graphology.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sigma.js/3.0.0/sigma.min.js"></script>
+
+  <script type="module">
+    // Graphology and Sigma are loaded as UMD globals
+    const { Graph } = graphology;
+
+    // ---- Color palettes ----
+
+    // Channel colors (primary grouping)
+    const CHANNEL_COLORS = {
+      architect: "#7c3aed",
+      cortex: "#f59e0b",
+      investments: "#10b981",
+      context: "#3b82f6",
+      unknown: "#6b7280",
+    };
+
+    // Prefix-specific accent overrides (within channels)
+    const PREFIX_COLORS = {
+      insight: "#06b6d4",
+      pattern: "#8b5cf6",
+      knowledge: "#3b82f6",
+      todo: "#64748b",
+      alloy: "#f43f5e",
+      ferment: "#22c55e",
+      myth: "#d946ef",
+      cortex: "#f59e0b",
+      context: "#0ea5e9",
+      admin: "#ef4444",
+      infra: "#f97316",
+      convention: "#14b8a6",
+      investments: "#10b981",
+      project: "#a855f7",
+      concept: "#ec4899",
+      workshop: "#eab308",
+      person: "#fb923c",
+      room: "#6366f1",
+      rule: "#f87171",
+    };
+
+    // Edge type colors
+    const EDGE_COLORS = {
+      RELATES_TO: "#2a2a3a",
+      HAS_KNOWLEDGE: "#1e3a5f",
+      PART_OF: "#2d3a1e",
+      ACTIVATES: "#3a2d1e",
+      APPLIES_TO: "#2d1e3a",
+      IMPLEMENTS: "#1e3a3a",
+      HAS_PATTERN: "#3a1e2d",
+      INFORMS: "#1e2d3a",
+      SYNTHESIZES: "#2d1e2d",
+      DEFINES: "#3a3a1e",
+      ENCODES: "#1e1e3a",
+      TENSION: "#ef4444",
+    };
+
+    const DARK_BG = { r: 6, g: 6, b: 10 }; // #06060a
+
+    // ---- Helpers ----
+
+    function hexToRgb(hex) {
+      const m = hex.replace("#", "").match(/.{2}/g);
+      return { r: parseInt(m[0], 16), g: parseInt(m[1], 16), b: parseInt(m[2], 16) };
+    }
+
+    function rgbToHex(r, g, b) {
+      return "#" + [r, g, b].map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+    }
+
+    function dimColor(hex, amount) {
+      const rgb = hexToRgb(hex);
+      return rgbToHex(
+        DARK_BG.r + (rgb.r - DARK_BG.r) * amount,
+        DARK_BG.g + (rgb.g - DARK_BG.g) * amount,
+        DARK_BG.b + (rgb.b - DARK_BG.b) * amount,
+      );
+    }
+
+    function brightenColor(hex, factor) {
+      const rgb = hexToRgb(hex);
+      return rgbToHex(rgb.r * factor, rgb.g * factor, rgb.b * factor);
+    }
+
+    function getNodeColor(node) {
+      return PREFIX_COLORS[node.prefix] || CHANNEL_COLORS[node.channel] || CHANNEL_COLORS.unknown;
+    }
+
+    function truncate(str, maxLen) {
+      if (!str || str.length <= maxLen) return str;
+      return str.slice(0, maxLen) + "...";
+    }
+
+    // ---- State ----
+    let selectedNode = null;
+    let hoveredNode = null;
+    let searchMatches = new Set();
+    let graphData = null;
+    let sigmaInstance = null;
+    let graphInstance = null;
+
+    // ---- Build graph ----
+
+    function buildGraph(data) {
+      const graph = new Graph();
+
+      // Use golden-angle radial distribution for initial positions
+      const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+      let i = 0;
+
+      for (const node of data.nodes) {
+        const angle = i * goldenAngle;
+        const radius = Math.sqrt(i + 1) * 20;
+        const color = getNodeColor(node);
+
+        graph.addNode(node.id, {
+          label: node.name.length > 40 ? node.name.split(":").slice(-1)[0] : node.name,
+          x: Math.cos(angle) * radius,
+          y: Math.sin(angle) * radius,
+          size: 4,
+          color: color,
+          // Store metadata
+          _name: node.name,
+          _channel: node.channel,
+          _prefix: node.prefix,
+          _description: node.description,
+          _properties: node.properties,
+          _created_at: node.created_at,
+          _updated_at: node.updated_at,
+        });
+        i++;
+      }
+
+      // Compute degree for sizing
+      const degreeMap = {};
+      for (const edge of data.edges) {
+        degreeMap[edge.source] = (degreeMap[edge.source] || 0) + 1;
+        degreeMap[edge.target] = (degreeMap[edge.target] || 0) + 1;
+      }
+
+      // Apply degree-based sizing
+      graph.forEachNode((node, attrs) => {
+        const degree = degreeMap[node] || 0;
+        const size = Math.max(3, Math.min(20, 3 + Math.sqrt(degree) * 2));
+        graph.setNodeAttribute(node, "size", size);
+        graph.setNodeAttribute(node, "_degree", degree);
+      });
+
+      // Add edges
+      let edgeIdx = 0;
+      for (const edge of data.edges) {
+        if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue;
+
+        const edgeColor = EDGE_COLORS[edge.type] || "#1a1a2a";
+        const curvature = 0.12 + Math.random() * 0.08;
+
+        try {
+          graph.addEdgeWithKey(`e${edgeIdx}`, edge.source, edge.target, {
+            color: edgeColor,
+            size: edge.type === "TENSION" ? 2 : 0.5,
+            type: "curved",
+            curvature: curvature,
+            _relType: edge.type,
+            _context: edge.context,
+          });
+        } catch (_) {
+          // Parallel edges: silently skip if same key issue
+        }
+        edgeIdx++;
+      }
+
+      return graph;
+    }
+
+    // ---- ForceAtlas2 (simple implementation without Web Worker) ----
+
+    function runForceAtlas2(graph, iterations = 300) {
+      const nodes = [];
+      graph.forEachNode((id, attrs) => {
+        nodes.push({ id, x: attrs.x, y: attrs.y, size: attrs.size || 4 });
+      });
+
+      const nodeIndex = {};
+      nodes.forEach((n, i) => nodeIndex[n.id] = i);
+
+      const edges = [];
+      graph.forEachEdge((edge, attrs, source, target) => {
+        if (nodeIndex[source] !== undefined && nodeIndex[target] !== undefined) {
+          edges.push({ source: nodeIndex[source], target: nodeIndex[target] });
+        }
+      });
+
+      const gravity = 0.8;
+      const scalingRatio = 15;
+      const slowDown = 1;
+
+      for (let iter = 0; iter < iterations; iter++) {
+        const forces = nodes.map(() => ({ x: 0, y: 0 }));
+
+        // Repulsion (Barnes-Hut approximation skipped for <500 nodes)
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const dx = nodes[i].x - nodes[j].x;
+            const dy = nodes[i].y - nodes[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+            const repulsion = (scalingRatio * nodes[i].size * nodes[j].size) / dist;
+            const fx = (dx / dist) * repulsion;
+            const fy = (dy / dist) * repulsion;
+            forces[i].x += fx;
+            forces[i].y += fy;
+            forces[j].x -= fx;
+            forces[j].y -= fy;
+          }
+        }
+
+        // Attraction (edges)
+        for (const edge of edges) {
+          const dx = nodes[edge.target].x - nodes[edge.source].x;
+          const dy = nodes[edge.target].y - nodes[edge.source].y;
+          const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+          const attraction = dist / scalingRatio;
+          forces[edge.source].x += (dx / dist) * attraction;
+          forces[edge.source].y += (dy / dist) * attraction;
+          forces[edge.target].x -= (dx / dist) * attraction;
+          forces[edge.target].y -= (dy / dist) * attraction;
+        }
+
+        // Gravity
+        for (let i = 0; i < nodes.length; i++) {
+          const dist = Math.sqrt(nodes[i].x * nodes[i].x + nodes[i].y * nodes[i].y);
+          if (dist > 0) {
+            forces[i].x -= gravity * nodes[i].x / dist * nodes[i].size;
+            forces[i].y -= gravity * nodes[i].y / dist * nodes[i].size;
+          }
+        }
+
+        // Apply forces
+        const cooling = 1 - (iter / iterations) * 0.5;
+        for (let i = 0; i < nodes.length; i++) {
+          const speed = (1 / (1 + Math.sqrt(forces[i].x * forces[i].x + forces[i].y * forces[i].y))) * cooling / slowDown;
+          nodes[i].x += forces[i].x * speed;
+          nodes[i].y += forces[i].y * speed;
+        }
+      }
+
+      // Apply positions back to graph
+      for (const node of nodes) {
+        graph.setNodeAttribute(node.id, "x", node.x);
+        graph.setNodeAttribute(node.id, "y", node.y);
+      }
+    }
+
+    // ---- Render ----
+
+    async function init() {
+      // Fetch graph data
+      const res = await fetch("/api/graph");
+      graphData = await res.json();
+
+      // Update stats
+      document.getElementById("node-count").textContent = graphData.nodes.length;
+      document.getElementById("edge-count").textContent = graphData.edges.length;
+      const channels = [...new Set(graphData.nodes.map(n => n.channel))];
+      document.getElementById("channel-count").textContent = channels.length;
+
+      // Build Graphology graph
+      graphInstance = buildGraph(graphData);
+
+      // Run layout
+      runForceAtlas2(graphInstance, 400);
+
+      // Build legend
+      buildLegend(graphData);
+
+      // Initialize Sigma
+      const container = document.getElementById("graph-container");
+      sigmaInstance = new Sigma(graphInstance, container, {
+        edgeProgramClasses: {
+          curved: Sigma.rendering.EdgeCurveProgram,
+        },
+        renderLabels: true,
+        labelFont: "JetBrains Mono, SF Mono, monospace",
+        labelSize: 11,
+        labelWeight: "500",
+        labelColor: { color: "#e4e4ed" },
+        labelRenderedSizeThreshold: 7,
+        labelDensity: 0.07,
+        labelGridCellSize: 80,
+        defaultNodeColor: "#6b7280",
+        defaultEdgeColor: "#1a1a2a",
+        minCameraRatio: 0.01,
+        maxCameraRatio: 50,
+        hideEdgesOnMove: true,
+        zIndex: true,
+        nodeReducer: (node, data) => {
+          const res = { ...data };
+          if (data.hidden) { res.hidden = true; return res; }
+
+          // Search mode
+          if (searchMatches.size > 0) {
+            if (searchMatches.has(node)) {
+              res.color = "#06b6d4";
+              res.size = (data.size || 4) * 1.6;
+              res.zIndex = 2;
+              res.highlighted = true;
+            } else {
+              res.color = dimColor(data.color || "#6b7280", 0.15);
+              res.size = (data.size || 4) * 0.5;
+              res.zIndex = 0;
+            }
+            return res;
+          }
+
+          // Selection mode
+          if (selectedNode) {
+            if (node === selectedNode) {
+              res.size = (data.size || 4) * 1.8;
+              res.zIndex = 3;
+              res.highlighted = true;
+            } else if (graphInstance.hasEdge(node, selectedNode) || graphInstance.hasEdge(selectedNode, node)) {
+              res.size = (data.size || 4) * 1.3;
+              res.zIndex = 2;
+            } else {
+              res.color = dimColor(data.color || "#6b7280", 0.2);
+              res.size = (data.size || 4) * 0.5;
+              res.zIndex = 0;
+            }
+            return res;
+          }
+
+          // Hover mode
+          if (hoveredNode) {
+            if (node === hoveredNode) {
+              res.size = (data.size || 4) * 1.5;
+              res.zIndex = 3;
+              res.highlighted = true;
+            } else if (graphInstance.hasEdge(node, hoveredNode) || graphInstance.hasEdge(hoveredNode, node)) {
+              res.size = (data.size || 4) * 1.2;
+              res.zIndex = 2;
+            } else {
+              res.color = dimColor(data.color || "#6b7280", 0.3);
+              res.size = (data.size || 4) * 0.7;
+              res.zIndex = 0;
+            }
+          }
+
+          return res;
+        },
+        edgeReducer: (edge, data) => {
+          const res = { ...data };
+
+          if (searchMatches.size > 0) {
+            const [source, target] = graphInstance.extremities(edge);
+            if (searchMatches.has(source) && searchMatches.has(target)) {
+              res.color = "#06b6d4";
+              res.size = 2;
+              res.zIndex = 2;
+            } else {
+              res.color = dimColor(data.color || "#1a1a2a", 0.05);
+              res.size = 0.2;
+              res.zIndex = 0;
+            }
+            return res;
+          }
+
+          const active = selectedNode || hoveredNode;
+          if (active) {
+            const [source, target] = graphInstance.extremities(edge);
+            if (source === active || target === active) {
+              res.color = brightenColor(data.color || "#2a2a3a", 2);
+              res.size = Math.max(2, (data.size || 0.5) * 4);
+              res.zIndex = 2;
+            } else {
+              res.color = dimColor(data.color || "#1a1a2a", 0.08);
+              res.size = 0.2;
+              res.zIndex = 0;
+            }
+          }
+
+          return res;
+        },
+        defaultDrawNodeHover: (context, data, settings) => {
+          const label = data.label;
+          if (!label) return;
+
+          const size = 11;
+          const font = "JetBrains Mono, SF Mono, monospace";
+          context.font = `500 ${size}px ${font}`;
+
+          const fullName = data._name || label;
+          const textWidth = context.measureText(fullName).width;
+          const nodeSize = data.size || 4;
+          const x = data.x;
+          const y = data.y - nodeSize - 12;
+          const paddingX = 10;
+          const paddingY = 6;
+          const height = size + paddingY * 2;
+          const width = textWidth + paddingX * 2;
+          const radius = 5;
+
+          // Dark pill background
+          context.fillStyle = "#12121c";
+          context.beginPath();
+          context.roundRect(x - width / 2, y - height / 2, width, height, radius);
+          context.fill();
+
+          // Border in node color
+          context.strokeStyle = data.color || "#7c3aed";
+          context.lineWidth = 1.5;
+          context.stroke();
+
+          // Label
+          context.fillStyle = "#f5f5f7";
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillText(fullName, x, y);
+
+          // Glow ring
+          context.beginPath();
+          context.arc(data.x, data.y, nodeSize + 3, 0, Math.PI * 2);
+          context.strokeStyle = data.color || "#7c3aed";
+          context.lineWidth = 1.5;
+          context.globalAlpha = 0.4;
+          context.stroke();
+          context.globalAlpha = 1;
+        },
+      });
+
+      // ---- Events ----
+
+      sigmaInstance.on("clickNode", ({ node }) => {
+        selectedNode = node;
+        showDetail(node);
+        nudgeCamera();
+      });
+
+      sigmaInstance.on("clickStage", () => {
+        selectedNode = null;
+        hideDetail();
+        nudgeCamera();
+      });
+
+      sigmaInstance.on("enterNode", ({ node }) => {
+        hoveredNode = node;
+        container.style.cursor = "pointer";
+        sigmaInstance.refresh();
+      });
+
+      sigmaInstance.on("leaveNode", () => {
+        hoveredNode = null;
+        container.style.cursor = "grab";
+        sigmaInstance.refresh();
+      });
+
+      // Search
+      const searchInput = document.getElementById("search");
+      searchInput.addEventListener("input", (e) => {
+        const query = e.target.value.toLowerCase().trim();
+        searchMatches = new Set();
+        if (query.length >= 2) {
+          graphInstance.forEachNode((node, attrs) => {
+            if (
+              node.toLowerCase().includes(query) ||
+              (attrs._description || "").toLowerCase().includes(query)
+            ) {
+              searchMatches.add(node);
+            }
+          });
+        }
+        sigmaInstance.refresh();
+      });
+
+      // Keyboard shortcuts
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          selectedNode = null;
+          hoveredNode = null;
+          searchMatches = new Set();
+          searchInput.value = "";
+          hideDetail();
+          nudgeCamera();
+        }
+        if (e.key === "/" && document.activeElement !== searchInput) {
+          e.preventDefault();
+          searchInput.focus();
+        }
+      });
+
+      // Hide loading
+      document.getElementById("loading").classList.add("hidden");
+    }
+
+    function nudgeCamera() {
+      if (!sigmaInstance) return;
+      const cam = sigmaInstance.getCamera();
+      cam.animate({ ratio: cam.ratio * 1.0001 }, { duration: 50 });
+      sigmaInstance.refresh();
+    }
+
+    function showDetail(nodeId) {
+      const attrs = graphInstance.getNodeAttributes(nodeId);
+      const panel = document.getElementById("detail");
+
+      document.getElementById("detail-name").textContent = attrs._name || nodeId;
+      document.getElementById("detail-meta").textContent =
+        `${attrs._channel} / ${attrs._prefix}  |  ${attrs._degree || 0} connections  |  updated ${attrs._updated_at || "?"}`;
+
+      const desc = attrs._description || "";
+      document.getElementById("detail-desc").textContent = truncate(desc, 600);
+
+      // List edges
+      const edgesDiv = document.getElementById("detail-edges");
+      edgesDiv.innerHTML = "";
+
+      graphInstance.forEachEdge(nodeId, (edge, edgeAttrs, source, target) => {
+        const other = source === nodeId ? target : source;
+        const direction = source === nodeId ? "\u2192" : "\u2190";
+        const item = document.createElement("div");
+        item.className = "edge-item";
+        item.innerHTML = `${direction} <span class="edge-type">${edgeAttrs._relType}</span> <span class="edge-target" data-node="${other}">${other}</span>`;
+        edgesDiv.appendChild(item);
+      });
+
+      // Click on edge targets to navigate
+      edgesDiv.querySelectorAll(".edge-target").forEach(el => {
+        el.addEventListener("click", () => {
+          const targetNode = el.dataset.node;
+          selectedNode = targetNode;
+          showDetail(targetNode);
+
+          // Animate camera to the node
+          const targetAttrs = graphInstance.getNodeAttributes(targetNode);
+          const pos = sigmaInstance.graphToViewport({ x: targetAttrs.x, y: targetAttrs.y });
+          sigmaInstance.getCamera().animate(
+            { x: targetAttrs.x, y: targetAttrs.y, ratio: sigmaInstance.getCamera().ratio },
+            { duration: 300 }
+          );
+          nudgeCamera();
+        });
+      });
+
+      panel.classList.add("visible");
+    }
+
+    function hideDetail() {
+      document.getElementById("detail").classList.remove("visible");
+    }
+
+    function buildLegend(data) {
+      const legend = document.getElementById("legend");
+      legend.innerHTML = "";
+
+      // Channel section
+      const channels = [...new Set(data.nodes.map(n => n.channel))].sort();
+      const channelHeader = document.createElement("h3");
+      channelHeader.textContent = "Channels";
+      legend.appendChild(channelHeader);
+
+      for (const ch of channels) {
+        const count = data.nodes.filter(n => n.channel === ch).length;
+        const item = document.createElement("div");
+        item.className = "legend-item";
+        item.innerHTML = `<span class="legend-dot" style="background: ${CHANNEL_COLORS[ch] || CHANNEL_COLORS.unknown}"></span> ${ch} (${count})`;
+        legend.appendChild(item);
+      }
+
+      // Prefix section (top prefixes only)
+      const prefixCounts = {};
+      for (const node of data.nodes) {
+        prefixCounts[node.prefix] = (prefixCounts[node.prefix] || 0) + 1;
+      }
+      const topPrefixes = Object.entries(prefixCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12);
+
+      const prefixHeader = document.createElement("h3");
+      prefixHeader.textContent = "Node Types";
+      prefixHeader.style.marginTop = "10px";
+      legend.appendChild(prefixHeader);
+
+      for (const [prefix, count] of topPrefixes) {
+        const item = document.createElement("div");
+        item.className = "legend-item";
+        item.innerHTML = `<span class="legend-dot" style="background: ${PREFIX_COLORS[prefix] || "#6b7280"}"></span> ${prefix} (${count})`;
+        legend.appendChild(item);
+      }
+
+      // Edge types (top)
+      const edgeCounts = {};
+      for (const edge of data.edges) {
+        edgeCounts[edge.type] = (edgeCounts[edge.type] || 0) + 1;
+      }
+      const topEdges = Object.entries(edgeCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+
+      const edgeHeader = document.createElement("h3");
+      edgeHeader.textContent = "Edge Types";
+      edgeHeader.style.marginTop = "10px";
+      legend.appendChild(edgeHeader);
+
+      for (const [type, count] of topEdges) {
+        const item = document.createElement("div");
+        item.className = "legend-item";
+        const color = EDGE_COLORS[type] || "#1a1a2a";
+        item.innerHTML = `<span class="legend-dot" style="background: ${brightenColor(color, 3)}"></span> ${type} (${count})`;
+        legend.appendChild(item);
+      }
+    }
+
+    // ---- Start ----
+    init().catch(err => {
+      console.error("Failed to initialize:", err);
+      document.getElementById("loading").innerHTML = `<span style="color: #ef4444;">Failed to load graph: ${err.message}</span>`;
+    });
+  </script>
+</body>
+</html>

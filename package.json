@@ -1,0 +1,15 @@
+{
+  "name": "r7-viz",
+  "version": "0.1.0",
+  "description": "Interactive FalkorDB graph visualizer for r7",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^5.1.0",
+    "falkordb": "^6.6.2"
+  }
+}
