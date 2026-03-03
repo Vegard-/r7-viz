@@ -34,6 +34,10 @@ Open [http://localhost:3333](http://localhost:3333).
 | `FALKORDB_PASSWORD` | | FalkorDB password |
 | `FALKORDB_USERNAME` | | FalkorDB username |
 | `GRAPH_NAME` | `r7` | Graph name to visualize |
+| `NAME_PROP` | `name` | Node property used as label |
+| `DESC_PROP` | `description` | Node property used for description |
+| `GROUP_PROP` | `channel` | Node property used for color grouping |
+| `NODE_LABEL` | *(all)* | Graph label to query (empty = all labels) |
 | `PORT` | `3333` | HTTP server port |
 
 ## Stack

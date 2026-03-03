@@ -13,6 +13,12 @@ const FALKORDB_USERNAME = process.env.FALKORDB_USERNAME || "";
 const GRAPH_NAME = process.env.GRAPH_NAME || "r7";
 const PORT = parseInt(process.env.PORT || "3333", 10);
 
+// Configurable field mapping — adapts queries to any FalkorDB schema
+const NAME_PROP = process.env.NAME_PROP || "name";
+const DESC_PROP = process.env.DESC_PROP || "description";
+const GROUP_PROP = process.env.GROUP_PROP || "channel";
+const NODE_LABEL = process.env.NODE_LABEL || "";  // empty = all labels
+
 let db;
 let graph;
 
@@ -25,31 +31,67 @@ async function connectDB() {
   console.log(`Connected to FalkorDB at ${FALKORDB_HOST}:${FALKORDB_PORT}, graph: ${GRAPH_NAME}`);
 }
 
+// Auto-discover schema from FalkorDB
+async function fetchSchema() {
+  const [labelsRes, relTypesRes, propsRes] = await Promise.all([
+    graph.query("CALL db.labels()"),
+    graph.query("CALL db.relationshipTypes()"),
+    graph.query("CALL db.propertyKeys()"),
+  ]);
+
+  const labels = (labelsRes.data || []).map(r => r.label || Object.values(r)[0]);
+  const relationshipTypes = (relTypesRes.data || []).map(r => r.relationshipType || Object.values(r)[0]);
+  const propertyKeys = (propsRes.data || []).map(r => r.propertyKey || Object.values(r)[0]);
+
+  return {
+    labels,
+    relationshipTypes,
+    propertyKeys,
+    config: { NAME_PROP, DESC_PROP, GROUP_PROP, NODE_LABEL },
+  };
+}
+
 async function fetchGraph() {
-  // Fetch all nodes — falkordb v6 returns data as objects keyed by column name
+  // Build label match — specific label or all nodes
+  const labelMatch = NODE_LABEL ? `(n:\`${NODE_LABEL}\`)` : "(n)";
+
+  // Fetch all nodes — use configured property names
   const nodesResult = await graph.query(
-    `MATCH (n:Node) RETURN n.name AS name, n.channel AS channel, n.description AS description, n.properties AS properties, n.created_at AS created_at, n.updated_at AS updated_at`
+    `MATCH ${labelMatch} RETURN n.\`${NAME_PROP}\` AS name, n.\`${GROUP_PROP}\` AS group_val, n.\`${DESC_PROP}\` AS description, labels(n) AS labels, properties(n) AS all_props`
   );
 
   const nodes = [];
   for (const row of nodesResult.data || []) {
-    const name = row.name;
+    // Use configured name prop, fall back to first available string property or node ID
+    const name = row.name || "";
     if (!name) continue;
-    const channel = row.channel || "unknown";
+    const groupVal = row.group_val || "unknown";
     const description = row.description || "";
-    const properties = row.properties || "{}";
-    const created_at = row.created_at || "";
-    const updated_at = row.updated_at || "";
+    const nodeLabels = row.labels || [];
+    const allProps = row.all_props || {};
 
     // Extract prefix from name (e.g., "insight" from "insight:foo")
     const prefix = name.includes(":") ? name.split(":")[0] : "other";
 
-    nodes.push({ id: name, name, channel, prefix, description, properties, created_at, updated_at });
+    nodes.push({
+      id: name,
+      name,
+      group: groupVal,
+      prefix,
+      description,
+      labels: nodeLabels,
+      properties: JSON.stringify(allProps),
+      created_at: allProps.created_at || "",
+      updated_at: allProps.updated_at || "",
+    });
   }
 
-  // Fetch all edges
+  // Fetch all edges — use same label filter
+  const edgeMatch = NODE_LABEL
+    ? `(a:\`${NODE_LABEL}\`)-[r]->(b:\`${NODE_LABEL}\`)`
+    : "(a)-[r]->(b)";
   const edgesResult = await graph.query(
-    `MATCH (a:Node)-[r]->(b:Node) RETURN a.name AS source, b.name AS target, type(r) AS type, r.context AS context`
+    `MATCH ${edgeMatch} WHERE a.\`${NAME_PROP}\` IS NOT NULL AND b.\`${NAME_PROP}\` IS NOT NULL RETURN a.\`${NAME_PROP}\` AS source, b.\`${NAME_PROP}\` AS target, type(r) AS type, r.context AS context`
   );
 
   const edges = [];
@@ -67,6 +109,16 @@ async function fetchGraph() {
 
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/api/schema", async (_req, res) => {
+  try {
+    const schema = await fetchSchema();
+    res.json(schema);
+  } catch (err) {
+    console.error("Failed to fetch schema:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get("/api/graph", async (_req, res) => {
   try {
