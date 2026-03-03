@@ -149,9 +149,16 @@
       color: var(--text-secondary);
       line-height: 1.5;
       white-space: pre-wrap;
-      max-height: 200px;
-      overflow-y: auto;
     }
+    #detail .description.collapsed { max-height: 200px; overflow-y: hidden; }
+    #detail .show-more {
+      display: inline-block;
+      margin-top: 4px;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    #detail .show-more:hover { text-decoration: underline; }
     #detail .edges-list {
       margin-top: 8px;
       border-top: 1px solid var(--border);
@@ -205,7 +212,8 @@
   <div id="detail">
     <h2 id="detail-name"></h2>
     <div class="meta" id="detail-meta"></div>
-    <div class="description" id="detail-desc"></div>
+    <div class="description collapsed" id="detail-desc"></div>
+    <span class="show-more" id="detail-show-more" style="display:none"></span>
     <div class="edges-list" id="detail-edges"></div>
   </div>
 
@@ -722,7 +730,20 @@
         `${attrs._channel} / ${attrs._prefix}  |  ${attrs._degree || 0} connections  |  updated ${attrs._updated_at || "?"}`;
 
       const desc = attrs._description || "";
-      document.getElementById("detail-desc").textContent = truncate(desc, 600);
+      const descEl = document.getElementById("detail-desc");
+      const showMoreEl = document.getElementById("detail-show-more");
+      descEl.textContent = desc;
+      descEl.classList.add("collapsed");
+      if (desc.length > 400) {
+        showMoreEl.textContent = "Show more";
+        showMoreEl.style.display = "inline-block";
+        showMoreEl.onclick = () => {
+          const isCollapsed = descEl.classList.toggle("collapsed");
+          showMoreEl.textContent = isCollapsed ? "Show more" : "Show less";
+        };
+      } else {
+        showMoreEl.style.display = "none";
+      }
 
       // List edges
       const edgesDiv = document.getElementById("detail-edges");
