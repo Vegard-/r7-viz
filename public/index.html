@@ -245,6 +245,7 @@
       transition: opacity 0.2s, border-color 0.2s;
     }
     .layout-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+    .layout-btn.active { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.1); }
 
     /* Search */
     #search-container {
@@ -311,6 +312,7 @@
     <button id="refresh-btn" class="layout-btn" title="Re-fetch graph data">&#x21BB;</button>
     <button id="reset-layout-btn" class="layout-btn">Reset positions</button>
     <button id="tighten-btn" class="layout-btn">Tighten grouping</button>
+    <button id="tensions-btn" class="layout-btn" title="Highlight TENSION edges">Tensions</button>
   </div>
 
   <div id="search-container">
@@ -496,6 +498,8 @@
     // Filter state: which groups/sub-groups are hidden
     const hiddenGroups = new Set();    // primary groups
     const hiddenSubGroups = new Set(); // "primary/sub" keys
+    const hiddenEdgeTypes = new Set(); // edge types to hide
+    let highlightTensions = false;     // TENSION edge highlight mode
 
     // ---- Build graph ----
 
@@ -769,6 +773,9 @@
         searchMatches = new Map();
         hiddenGroups.clear();
         hiddenSubGroups.clear();
+        hiddenEdgeTypes.clear();
+        highlightTensions = false;
+        document.getElementById("tensions-btn").classList.remove("active");
         document.getElementById("search").value = "";
         hideDetail();
         sigmaInstance.refresh();
@@ -849,6 +856,25 @@
 
           if (data.hidden) { res.hidden = true; return res; }
 
+          // TENSION highlight mode
+          if (highlightTensions) {
+            const isTensionNode = graphInstance.edges(node).some(e => {
+              const attrs = graphInstance.getEdgeAttributes(e);
+              return attrs._relType === "TENSION";
+            });
+            if (isTensionNode) {
+              res.color = "#ef4444";
+              res.size = (data.size || 4) * 2;
+              res.zIndex = 3;
+              res.highlighted = true;
+            } else {
+              res.color = dimColor(data.color || "#6b7280", 0.15);
+              res.size = (data.size || 4) * 0.5;
+              res.zIndex = 0;
+            }
+            return res;
+          }
+
           // Search mode
           if (searchMatches.size > 0) {
             const matchType = searchMatches.get(node);
@@ -913,6 +939,27 @@
           const targetAttrs = graphInstance.getNodeAttributes(target);
           if (isNodeHidden(sourceAttrs) || isNodeHidden(targetAttrs)) {
             res.hidden = true;
+            return res;
+          }
+
+          // Hide filtered edge types
+          if (hiddenEdgeTypes.has(data._relType)) {
+            res.hidden = true;
+            return res;
+          }
+
+          // TENSION highlight mode
+          if (highlightTensions) {
+            if (data._relType === "TENSION") {
+              res.color = "#ef4444";
+              res.size = 4;
+              res.zIndex = 10;
+              res.forceLabel = true;
+            } else {
+              res.color = dimColor(data.color || "#1a1a2a", 0.08);
+              res.size = 0.2;
+              res.zIndex = 0;
+            }
             return res;
           }
 
@@ -1084,6 +1131,11 @@
       document.getElementById("refresh-btn").addEventListener("click", refreshGraph);
       document.getElementById("reset-layout-btn").addEventListener("click", restoreOriginalPositions);
       document.getElementById("tighten-btn").addEventListener("click", relayoutVisible);
+      document.getElementById("tensions-btn").addEventListener("click", () => {
+        highlightTensions = !highlightTensions;
+        document.getElementById("tensions-btn").classList.toggle("active", highlightTensions);
+        sigmaInstance.refresh();
+      });
 
       // Keyboard shortcuts
       document.addEventListener("keydown", (e) => {
@@ -1094,6 +1146,9 @@
           searchInput.value = "";
           hiddenGroups.clear();
           hiddenSubGroups.clear();
+          hiddenEdgeTypes.clear();
+          highlightTensions = false;
+          document.getElementById("tensions-btn").classList.remove("active");
           restoreOriginalPositions();
           hideDetail();
           // Reset legend dimming
@@ -1336,8 +1391,19 @@
         for (const [type, count] of topEdges) {
           const item = document.createElement("div");
           item.className = "legend-item";
+          if (hiddenEdgeTypes.has(type)) item.classList.add("dimmed");
           const color = edgeColors[type] || "#1a1a2a";
           item.innerHTML = `<span class="legend-dot" style="background: ${brightenColor(color, 3)}"></span> ${type} (${count})`;
+          item.addEventListener("click", () => {
+            if (hiddenEdgeTypes.has(type)) {
+              hiddenEdgeTypes.delete(type);
+              item.classList.remove("dimmed");
+            } else {
+              hiddenEdgeTypes.add(type);
+              item.classList.add("dimmed");
+            }
+            sigmaInstance.refresh();
+          });
           legend.appendChild(item);
         }
       }
