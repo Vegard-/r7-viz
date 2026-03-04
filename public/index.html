@@ -612,7 +612,19 @@
       textEl.textContent = text;
       bar.style.display = "block";
       fill.style.width = "0%";
+      // Instant show (bypass CSS transition) so fast operations are still visible
+      el.style.transition = "none";
+      el.style.opacity = "1";
       el.classList.remove("hidden");
+    }
+
+    function hideProgress() {
+      const el = document.getElementById("loading");
+      // Restore fade-out transition
+      el.style.transition = "";
+      el.style.opacity = "";
+      el.classList.add("hidden");
+      document.getElementById("progress-bar").style.display = "none";
     }
 
     function updateProgress(pct, text) {
@@ -622,11 +634,6 @@
       if (text) textEl.textContent = text;
     }
 
-    function hideProgress() {
-      const el = document.getElementById("loading");
-      el.classList.add("hidden");
-      document.getElementById("progress-bar").style.display = "none";
-    }
 
     async function runForceAtlas2(graph, iterations = 300, onProgress) {
       const nodes = [];
@@ -746,6 +753,8 @@
       const btn = document.getElementById("tighten-btn");
       btn.disabled = true;
       showProgress("Tightening layout...");
+      // Yield so browser paints the overlay before layout blocks the thread
+      await new Promise(r => requestAnimationFrame(r));
 
       const visibleSet = new Set(visibleNodes);
 
