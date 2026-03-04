@@ -825,6 +825,19 @@
       // Build legend
       buildLegend(graphData, groupProps);
 
+      // Dynamic label/performance settings based on graph size
+      const nodeCount = graphData.nodes.length;
+      const edgeCount = graphData.edges.length;
+      const isLarge = nodeCount > 500;
+      const isVeryLarge = nodeCount > 2000;
+
+      // Scale label visibility: larger graphs show fewer labels until zoomed in
+      const dynamicLabelThreshold = isVeryLarge ? 14 : isLarge ? 10 : 7;
+      const dynamicLabelDensity = isVeryLarge ? 0.02 : isLarge ? 0.04 : 0.07;
+      const dynamicLabelGridCell = isVeryLarge ? 200 : isLarge ? 120 : 80;
+      // Edge labels are the biggest perf cost — disable for large graphs
+      const showEdgeLabels = !isLarge;
+
       // Initialize Sigma
       const container = document.getElementById("graph-container");
       sigmaInstance = new Sigma(graphInstance, container, {
@@ -836,16 +849,17 @@
         labelSize: 11,
         labelWeight: "500",
         labelColor: { color: "#e4e4ed" },
-        labelRenderedSizeThreshold: 7,
-        labelDensity: 0.07,
-        labelGridCellSize: 80,
+        labelRenderedSizeThreshold: dynamicLabelThreshold,
+        labelDensity: dynamicLabelDensity,
+        labelGridCellSize: dynamicLabelGridCell,
         defaultNodeColor: "#6b7280",
         defaultEdgeColor: "#1a1a2a",
         minCameraRatio: 0.01,
         maxCameraRatio: 50,
-        hideEdgesOnMove: true,
+        hideEdgesOnMove: isLarge,
+        hideLabelsOnMove: isLarge,
         zIndex: true,
-        renderEdgeLabels: true,
+        renderEdgeLabels: showEdgeLabels,
         edgeLabelSize: 9,
         edgeLabelColor: { color: "#5a5a70" },
         nodeReducer: (node, data) => {
