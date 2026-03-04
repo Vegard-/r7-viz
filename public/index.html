@@ -1335,7 +1335,23 @@
         : primaryLabel.charAt(0).toUpperCase() + primaryLabel.slice(1) + "s";
       legend.appendChild(header);
 
-      const sortedPrimaries = Object.keys(hierarchy).sort();
+      // Collapse small groups into "Other" when there are too many
+      const MAX_LEGEND_GROUPS = parseInt(new URLSearchParams(window.location.search).get("maxGroups") || "15", 10);
+      const primariesByCount = Object.keys(hierarchy)
+        .map(p => ({ name: p, count: Object.values(hierarchy[p]).reduce((a, b) => a + b, 0) }))
+        .sort((a, b) => b.count - a.count);
+
+      let sortedPrimaries;
+      let otherGroup = null;
+      if (primariesByCount.length > MAX_LEGEND_GROUPS) {
+        const kept = primariesByCount.slice(0, MAX_LEGEND_GROUPS);
+        const collapsed = primariesByCount.slice(MAX_LEGEND_GROUPS);
+        sortedPrimaries = kept.map(p => p.name).sort();
+        const otherCount = collapsed.reduce((sum, p) => sum + p.count, 0);
+        otherGroup = { count: otherCount, groupCount: collapsed.length };
+      } else {
+        sortedPrimaries = primariesByCount.map(p => p.name).sort();
+      }
 
       for (const primary of sortedPrimaries) {
         const entry = groupHierarchy[primary];
@@ -1426,6 +1442,16 @@
           groupDiv.appendChild(subsDiv);
           legend.appendChild(groupDiv);
         }
+      }
+
+      // "Other" collapsed group
+      if (otherGroup) {
+        const item = document.createElement("div");
+        item.className = "legend-item";
+        item.style.opacity = "0.6";
+        item.innerHTML = `<span class="legend-dot" style="background: #6b7280"></span> Other (${otherGroup.count} nodes in ${otherGroup.groupCount} groups)`;
+        item.title = "Small groups collapsed. Adjust with ?maxGroups=N in URL.";
+        legend.appendChild(item);
       }
 
       // Edge types section
