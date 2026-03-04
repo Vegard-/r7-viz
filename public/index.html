@@ -193,6 +193,24 @@
       font-size: 11px;
     }
     #detail .show-more:hover { text-decoration: underline; }
+    #detail .props-list {
+      margin-top: 8px;
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+    #detail .props-list h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .prop-item {
+      font-size: 11px;
+      padding: 1px 0;
+    }
+    .prop-key { color: var(--accent); }
+    .prop-val { color: var(--text-secondary); }
     #detail .edges-list {
       margin-top: 8px;
       border-top: 1px solid var(--border);
@@ -285,10 +303,12 @@
     <div class="meta" id="detail-meta"></div>
     <div class="description collapsed" id="detail-desc"></div>
     <span class="show-more" id="detail-show-more" style="display:none"></span>
+    <div class="props-list" id="detail-props"></div>
     <div class="edges-list" id="detail-edges"></div>
   </div>
 
   <div id="layout-controls">
+    <button id="refresh-btn" class="layout-btn" title="Re-fetch graph data">&#x21BB;</button>
     <button id="reset-layout-btn" class="layout-btn">Reset positions</button>
     <button id="tighten-btn" class="layout-btn">Tighten grouping</button>
   </div>
@@ -479,8 +499,9 @@
 
     // ---- Build graph ----
 
-    function buildGraph(data) {
-      const graph = new Graph();
+    function buildGraph(data, targetGraph) {
+      const graph = targetGraph || new Graph();
+      if (targetGraph) graph.clear();
 
       const goldenAngle = Math.PI * (3 - Math.sqrt(5));
       let i = 0;
@@ -538,6 +559,7 @@
             size: edge.type === "TENSION" ? 2 : 0.5,
             type: "curved",
             curvature: curvature,
+            label: edge.type,
             _relType: edge.type,
             _context: edge.context,
           });
@@ -707,6 +729,57 @@
     }
 
 
+    // ---- Refresh ----
+
+    async function refreshGraph() {
+      const btn = document.getElementById("refresh-btn");
+      const origText = btn.innerHTML;
+      btn.textContent = "...";
+      btn.disabled = true;
+      try {
+        const [schemaRes, graphRes] = await Promise.all([
+          fetch("/api/schema"),
+          fetch("/api/graph"),
+        ]);
+        schemaData = await schemaRes.json();
+        graphData = await graphRes.json();
+
+        // Clear caches
+        for (const k in nodeColorCache) delete nodeColorCache[k];
+        for (const k in groupHierarchy) delete groupHierarchy[k];
+
+        const groupProps = schemaData.config?.GROUP_PROPS || ["channel"];
+        buildColorHierarchy(graphData.nodes, groupProps);
+
+        // Rebuild graph in place (Sigma observes mutations)
+        buildGraph(graphData, graphInstance);
+        runForceAtlas2(graphInstance, 400);
+        saveOriginalPositions();
+
+        // Update stats
+        const primaryGroups = [...new Set(graphData.nodes.map(n => (n.groups || [n.group])[0] || "unknown"))];
+        document.getElementById("node-count").textContent = graphData.nodes.length;
+        document.getElementById("edge-count").textContent = graphData.edges.length;
+        document.getElementById("channel-count").textContent = primaryGroups.length;
+        buildLegend(graphData, groupProps);
+
+        // Reset interaction state
+        selectedNode = null;
+        hoveredNode = null;
+        searchMatches = new Map();
+        hiddenGroups.clear();
+        hiddenSubGroups.clear();
+        document.getElementById("search").value = "";
+        hideDetail();
+        sigmaInstance.refresh();
+      } catch (err) {
+        console.error("Refresh failed:", err);
+      } finally {
+        btn.innerHTML = origText;
+        btn.disabled = false;
+      }
+    }
+
     // ---- Render ----
 
     async function init() {
@@ -761,6 +834,10 @@
         maxCameraRatio: 50,
         hideEdgesOnMove: true,
         zIndex: true,
+        renderEdgeLabels: true,
+        edgeLabelSize: 9,
+        edgeLabelColor: { color: "#5a5a70" },
+        edgeLabelRenderedSizeThreshold: 20,
         nodeReducer: (node, data) => {
           const res = { ...data };
 
@@ -844,6 +921,7 @@
               res.color = "#06b6d4";
               res.size = 2;
               res.zIndex = 2;
+              res.forceLabel = true;
             } else {
               res.color = dimColor(data.color || "#1a1a2a", 0.05);
               res.size = 0.2;
@@ -858,6 +936,7 @@
               res.color = brightenColor(data.color || "#2a2a3a", 2);
               res.size = Math.max(2, (data.size || 0.5) * 4);
               res.zIndex = 2;
+              res.forceLabel = true;
             } else {
               res.color = dimColor(data.color || "#1a1a2a", 0.08);
               res.size = 0.2;
@@ -872,18 +951,32 @@
           if (!label) return;
 
           const size = 11;
+          const descSize = 9;
           const font = "JetBrains Mono, SF Mono, monospace";
           context.font = `500 ${size}px ${font}`;
 
           const fullName = data._name || label;
-          const textWidth = context.measureText(fullName).width;
+          const nameWidth = context.measureText(fullName).width;
           const nodeSize = data.size || 4;
-          const x = data.x;
-          const y = data.y - nodeSize - 12;
           const paddingX = 10;
           const paddingY = 6;
-          const height = size + paddingY * 2;
-          const width = textWidth + paddingX * 2;
+
+          // Description preview (first ~80 chars)
+          const rawDesc = (data._description || "").replace(/\n/g, " ").trim();
+          const descText = rawDesc.length > 80 ? rawDesc.slice(0, 80) + "..." : rawDesc;
+          let descWidth = 0;
+          if (descText) {
+            context.font = `400 ${descSize}px ${font}`;
+            descWidth = context.measureText(descText).width;
+          }
+
+          const contentWidth = Math.max(nameWidth, descWidth);
+          const width = contentWidth + paddingX * 2;
+          const lineGap = descText ? 4 : 0;
+          const descHeight = descText ? descSize + lineGap : 0;
+          const height = size + descHeight + paddingY * 2;
+          const x = data.x;
+          const y = data.y - nodeSize - 12 - (descHeight / 2);
           const radius = 5;
 
           context.fillStyle = "#12121c";
@@ -895,11 +988,22 @@
           context.lineWidth = 1.5;
           context.stroke();
 
+          // Name
+          context.font = `500 ${size}px ${font}`;
           context.fillStyle = "#f5f5f7";
           context.textAlign = "center";
           context.textBaseline = "middle";
-          context.fillText(fullName, x, y);
+          const nameY = descText ? y - descHeight / 2 : y;
+          context.fillText(fullName, x, nameY);
 
+          // Description
+          if (descText) {
+            context.font = `400 ${descSize}px ${font}`;
+            context.fillStyle = "#8888a0";
+            context.fillText(descText, x, nameY + size / 2 + lineGap + descSize / 2);
+          }
+
+          // Glow ring
           context.beginPath();
           context.arc(data.x, data.y, nodeSize + 3, 0, Math.PI * 2);
           context.strokeStyle = data.color || "#7c3aed";
@@ -953,7 +1057,31 @@
         sigmaInstance.refresh();
       });
 
+      // Enter in search: zoom to first name match
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && searchMatches.size > 0) {
+          // Prefer first name match, fallback to first desc match
+          let target = null;
+          for (const [node, type] of searchMatches) {
+            if (type === "name") { target = node; break; }
+            if (!target) target = node;
+          }
+          if (target) {
+            selectedNode = target;
+            showDetail(target);
+            const attrs = graphInstance.getNodeAttributes(target);
+            sigmaInstance.getCamera().animate(
+              { x: attrs.x, y: attrs.y, ratio: 0.3 },
+              { duration: 300 }
+            );
+            searchInput.blur();
+            nudgeCamera();
+          }
+        }
+      });
+
       // Layout control buttons
+      document.getElementById("refresh-btn").addEventListener("click", refreshGraph);
       document.getElementById("reset-layout-btn").addEventListener("click", restoreOriginalPositions);
       document.getElementById("tighten-btn").addEventListener("click", relayoutVisible);
 
@@ -1018,6 +1146,20 @@
         descEl.classList.remove("collapsed");
         showMoreEl.style.display = "none";
       }
+
+      // Properties
+      const propsDiv = document.getElementById("detail-props");
+      propsDiv.innerHTML = "";
+      try {
+        const allProps = JSON.parse(attrs._properties || "{}");
+        // Filter out display fields already shown (name, description, channel, created_at, updated_at)
+        const skipKeys = new Set(["name", "description", "channel", "created_at", "updated_at", "properties", "prev_description"]);
+        const entries = Object.entries(allProps).filter(([k]) => !skipKeys.has(k));
+        if (entries.length > 0) {
+          propsDiv.innerHTML = `<h4>Properties</h4>` +
+            entries.map(([k, v]) => `<div class="prop-item"><span class="prop-key">${k}</span>: <span class="prop-val">${String(v).length > 100 ? String(v).slice(0, 100) + "..." : v}</span></div>`).join("");
+        }
+      } catch (_) {}
 
       // List edges
       const edgesDiv = document.getElementById("detail-edges");
