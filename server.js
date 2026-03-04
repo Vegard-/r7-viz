@@ -16,9 +16,15 @@ const PORT = parseInt(process.env.PORT || "3333", 10);
 // Configurable field mapping — adapts queries to any FalkorDB schema
 const NAME_PROP = process.env.NAME_PROP || "name";
 const DESC_PROP = process.env.DESC_PROP || "description";
-const GROUP_PROP = process.env.GROUP_PROP || "channel";
-const GROUP_FALLBACK_PROP = process.env.GROUP_FALLBACK_PROP || "";  // use if GROUP_PROP is absent
 const NODE_LABEL = process.env.NODE_LABEL || "";  // empty = all labels
+
+// Multi-level grouping: comma-separated list of property names
+// First property = primary group (color hue), subsequent = sub-groups (shade)
+// e.g. GROUP_PROPS=channel,prefix  or  GROUP_PROPS=label,type
+const GROUP_PROPS = (process.env.GROUP_PROPS || process.env.GROUP_PROP || "channel")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
 
 let db;
 let graph;
@@ -48,7 +54,7 @@ async function fetchSchema() {
     labels,
     relationshipTypes,
     propertyKeys,
-    config: { NAME_PROP, DESC_PROP, GROUP_PROP, GROUP_FALLBACK_PROP, NODE_LABEL },
+    config: { NAME_PROP, DESC_PROP, GROUP_PROPS, NODE_LABEL },
   };
 }
 
@@ -56,22 +62,24 @@ async function fetchGraph() {
   // Build label match — specific label or all nodes
   const labelMatch = NODE_LABEL ? `(n:\`${NODE_LABEL}\`)` : "(n)";
 
-  // Fetch all nodes — use configured property names
-  const fallbackCol = GROUP_FALLBACK_PROP ? `, n.\`${GROUP_FALLBACK_PROP}\` AS group_fallback` : "";
+  // Build group columns for each configured group property
+  const groupCols = GROUP_PROPS.map((prop, i) => `, n.\`${prop}\` AS group_${i}`).join("");
   const nodesResult = await graph.query(
-    `MATCH ${labelMatch} RETURN n.\`${NAME_PROP}\` AS name, n.\`${GROUP_PROP}\` AS group_val, n.\`${DESC_PROP}\` AS description, labels(n) AS labels, properties(n) AS all_props${fallbackCol}`
+    `MATCH ${labelMatch} RETURN n.\`${NAME_PROP}\` AS name, n.\`${DESC_PROP}\` AS description, labels(n) AS labels, properties(n) AS all_props${groupCols}`
   );
 
   const nodes = [];
   for (const row of nodesResult.data || []) {
-    // Use configured name prop, fall back to first available string property or node ID
     const name = row.name || "";
     if (!name) continue;
-    // Use primary group prop, fall back to fallback prop, then "unknown"
-    const groupVal = row.group_val || row.group_fallback || "unknown";
     const description = row.description || "";
     const nodeLabels = row.labels || [];
     const allProps = row.all_props || {};
+
+    // Build groups array from configured props, falling through to next level
+    const groups = GROUP_PROPS.map((_, i) => row[`group_${i}`] || "");
+    // Primary group is first non-empty, or "unknown"
+    const primaryGroup = groups.find(g => g) || "unknown";
 
     // Extract prefix from name (e.g., "insight" from "insight:foo")
     const prefix = name.includes(":") ? name.split(":")[0] : "other";
@@ -79,7 +87,8 @@ async function fetchGraph() {
     nodes.push({
       id: name,
       name,
-      group: groupVal,
+      groups,           // array of group values at each level
+      group: primaryGroup,  // backward compat: primary group
       prefix,
       description,
       labels: nodeLabels,

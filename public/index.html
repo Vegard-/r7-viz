@@ -90,9 +90,10 @@
       font-size: 11px;
       color: var(--text-secondary);
       z-index: 10;
-      max-height: 50vh;
+      max-height: 70vh;
       overflow-y: auto;
       backdrop-filter: blur(8px);
+      min-width: 180px;
     }
     #legend h3 {
       font-size: 11px;
@@ -108,12 +109,45 @@
       padding: 2px 0;
       cursor: pointer;
       opacity: 0.9;
+      user-select: none;
     }
     .legend-item:hover { opacity: 1; }
+    .legend-item.dimmed { opacity: 0.3; }
     .legend-dot {
       width: 10px; height: 10px;
       border-radius: 50%;
       flex-shrink: 0;
+    }
+    .legend-group {
+      margin-bottom: 2px;
+    }
+    .legend-group-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+      cursor: pointer;
+      opacity: 0.9;
+      user-select: none;
+      font-weight: 600;
+    }
+    .legend-group-header:hover { opacity: 1; }
+    .legend-group-header.dimmed { opacity: 0.3; }
+    .legend-group-header .toggle {
+      font-size: 9px;
+      color: var(--text-muted);
+      width: 12px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .legend-sub-items {
+      padding-left: 18px;
+      overflow: hidden;
+      max-height: 500px;
+      transition: max-height 0.2s ease;
+    }
+    .legend-sub-items.collapsed {
+      max-height: 0;
     }
 
     /* Detail panel */
@@ -191,6 +225,21 @@
     }
     #search:focus { border-color: var(--accent); }
     #search::placeholder { color: var(--text-muted); }
+
+    /* Scrollbar styling */
+    #legend::-webkit-scrollbar,
+    #detail::-webkit-scrollbar {
+      width: 6px;
+    }
+    #legend::-webkit-scrollbar-track,
+    #detail::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #legend::-webkit-scrollbar-thumb,
+    #detail::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
   </style>
 </head>
 <body>
@@ -218,7 +267,7 @@
   </div>
 
   <div id="search-container">
-    <input id="search" type="text" placeholder="Search nodes..." />
+    <input id="search" type="text" placeholder="Search nodes... (press /)" />
   </div>
 
   <!-- Load from CDN -->
@@ -226,18 +275,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sigma.js/3.0.0/sigma.min.js"></script>
 
   <script type="module">
-    // Graphology and Sigma are loaded as UMD globals
     const { Graph } = graphology;
 
-    // ---- Color generation ----
-    // Generate distinct colors dynamically instead of hardcoding per-schema values
-
-    const PALETTE = [
-      "#7c3aed", "#f59e0b", "#10b981", "#3b82f6", "#06b6d4",
-      "#8b5cf6", "#f43f5e", "#22c55e", "#d946ef", "#0ea5e9",
-      "#ef4444", "#f97316", "#14b8a6", "#a855f7", "#ec4899",
-      "#eab308", "#fb923c", "#6366f1", "#f87171", "#64748b",
-    ];
+    // ---- Hierarchical color system ----
+    // Primary groups get distinct hues spread around the color wheel.
+    // Sub-groups within a primary get variations in lightness/saturation.
 
     const EDGE_PALETTE = [
       "#2a2a3a", "#1e3a5f", "#2d3a1e", "#3a2d1e", "#2d1e3a",
@@ -245,10 +287,120 @@
       "#1e1e3a", "#3a1e1e",
     ];
 
-    // Dynamic color maps — populated from data
-    const groupColors = {};
-    const prefixColors = {};
     const edgeColors = {};
+
+    // HSL utilities
+    function hslToHex(h, s, l) {
+      h = ((h % 360) + 360) % 360;
+      s = Math.max(0, Math.min(100, s));
+      l = Math.max(0, Math.min(100, l));
+      const a = s * Math.min(l, 100 - l) / 100;
+      const f = n => {
+        const k = (n + h / 30) % 12;
+        const color = l / 100 - a / 100 * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * Math.max(0, Math.min(1, color))).toString(16).padStart(2, "0");
+      };
+      return `#${f(0)}${f(8)}${f(4)}`;
+    }
+
+    function hexToHsl(hex) {
+      const m = hex.replace("#", "").match(/.{2}/g);
+      let r = parseInt(m[0], 16) / 255;
+      let g = parseInt(m[1], 16) / 255;
+      let b = parseInt(m[2], 16) / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+      if (max === min) { h = s = 0; }
+      else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        else if (max === g) h = ((b - r) / d + 2) / 6;
+        else h = ((r - g) / d + 4) / 6;
+      }
+      return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+    }
+
+    // Build hierarchical color map from data
+    // Returns: { "primary": { hue, color, subs: { "sub1": color, "sub2": color } } }
+    const groupHierarchy = {};
+    const nodeColorCache = {};
+
+    function buildColorHierarchy(nodes, groupProps) {
+      // Collect unique primary groups
+      const primarySet = new Set();
+      const subMap = {}; // primary -> Set of subs
+
+      for (const node of nodes) {
+        const groups = node.groups || [node.group || "unknown"];
+        const primary = groups[0] || node.group || "unknown";
+        primarySet.add(primary);
+        if (!subMap[primary]) subMap[primary] = new Set();
+        // Sub-group is the combination of remaining levels
+        if (groups.length > 1) {
+          const sub = groups.slice(1).filter(Boolean).join("/") || primary;
+          subMap[primary].add(sub);
+        }
+      }
+
+      const primaries = [...primarySet].sort();
+      const goldenAngle = 137.508; // degrees
+
+      primaries.forEach((primary, i) => {
+        // Distribute hues using golden angle for maximum distinctness
+        const hue = (i * goldenAngle) % 360;
+        const baseSaturation = 65;
+        const baseLightness = 55;
+        const baseColor = hslToHex(hue, baseSaturation, baseLightness);
+
+        const subs = [...(subMap[primary] || [])].sort();
+        const subColors = {};
+
+        if (subs.length <= 1) {
+          // Single or no sub-group: use base color
+          if (subs.length === 1) subColors[subs[0]] = baseColor;
+        } else {
+          // Multiple sub-groups: vary lightness and saturation
+          subs.forEach((sub, j) => {
+            const lightShift = -15 + (30 * j / (subs.length - 1)); // range: -15 to +15
+            const satShift = -10 + (20 * j / (subs.length - 1));   // range: -10 to +10
+            subColors[sub] = hslToHex(
+              hue,
+              baseSaturation + satShift,
+              baseLightness + lightShift
+            );
+          });
+        }
+
+        groupHierarchy[primary] = {
+          hue,
+          color: baseColor,
+          subs: subColors,
+        };
+      });
+    }
+
+    function getNodeColor(node) {
+      const cacheKey = node.id || node.name;
+      if (nodeColorCache[cacheKey]) return nodeColorCache[cacheKey];
+
+      const groups = node.groups || [node.group || "unknown"];
+      const primary = groups[0] || node.group || "unknown";
+      const entry = groupHierarchy[primary];
+      if (!entry) {
+        nodeColorCache[cacheKey] = "#6b7280";
+        return "#6b7280";
+      }
+
+      let color = entry.color;
+      if (groups.length > 1) {
+        const sub = groups.slice(1).filter(Boolean).join("/") || primary;
+        if (entry.subs[sub]) color = entry.subs[sub];
+      }
+
+      nodeColorCache[cacheKey] = color;
+      return color;
+    }
 
     function assignColor(map, key, palette) {
       if (!map[key]) {
@@ -285,16 +437,6 @@
       return rgbToHex(rgb.r * factor, rgb.g * factor, rgb.b * factor);
     }
 
-    function getNodeColor(node) {
-      return assignColor(prefixColors, node.prefix, PALETTE)
-        || assignColor(groupColors, node.group || "unknown", PALETTE);
-    }
-
-    function truncate(str, maxLen) {
-      if (!str || str.length <= maxLen) return str;
-      return str.slice(0, maxLen) + "...";
-    }
-
     // ---- State ----
     let selectedNode = null;
     let hoveredNode = null;
@@ -304,12 +446,15 @@
     let sigmaInstance = null;
     let graphInstance = null;
 
+    // Filter state: which groups/sub-groups are hidden
+    const hiddenGroups = new Set();    // primary groups
+    const hiddenSubGroups = new Set(); // "primary/sub" keys
+
     // ---- Build graph ----
 
     function buildGraph(data) {
       const graph = new Graph();
 
-      // Use golden-angle radial distribution for initial positions
       const goldenAngle = Math.PI * (3 - Math.sqrt(5));
       let i = 0;
 
@@ -317,6 +462,7 @@
         const angle = i * goldenAngle;
         const radius = Math.sqrt(i + 1) * 20;
         const color = getNodeColor(node);
+        const groups = node.groups || [node.group || "unknown"];
 
         graph.addNode(node.id, {
           label: node.name.length > 40 ? node.name.split(":").slice(-1)[0] : node.name,
@@ -324,9 +470,9 @@
           y: Math.sin(angle) * radius,
           size: 4,
           color: color,
-          // Store metadata
           _name: node.name,
           _group: node.group,
+          _groups: groups,
           _prefix: node.prefix,
           _description: node.description,
           _properties: node.properties,
@@ -344,7 +490,6 @@
         degreeMap[edge.target] = (degreeMap[edge.target] || 0) + 1;
       }
 
-      // Apply degree-based sizing
       graph.forEachNode((node, attrs) => {
         const degree = degreeMap[node] || 0;
         const size = Math.max(3, Math.min(20, 3 + Math.sqrt(degree) * 2));
@@ -370,7 +515,7 @@
             _context: edge.context,
           });
         } catch (_) {
-          // Parallel edges: silently skip if same key issue
+          // Parallel edges: silently skip
         }
         edgeIdx++;
       }
@@ -378,7 +523,25 @@
       return graph;
     }
 
-    // ---- ForceAtlas2 (simple implementation without Web Worker) ----
+    // ---- Check if node is hidden by filter ----
+    function isNodeHidden(attrs) {
+      const groups = attrs._groups || [attrs._group || "unknown"];
+      const primary = groups[0] || "unknown";
+
+      // Check if entire primary group is hidden
+      if (hiddenGroups.has(primary)) return true;
+
+      // Check if specific sub-group is hidden
+      if (groups.length > 1) {
+        const sub = groups.slice(1).filter(Boolean).join("/") || primary;
+        const key = `${primary}/${sub}`;
+        if (hiddenSubGroups.has(key)) return true;
+      }
+
+      return false;
+    }
+
+    // ---- ForceAtlas2 ----
 
     function runForceAtlas2(graph, iterations = 300) {
       const nodes = [];
@@ -403,7 +566,6 @@
       for (let iter = 0; iter < iterations; iter++) {
         const forces = nodes.map(() => ({ x: 0, y: 0 }));
 
-        // Repulsion (Barnes-Hut approximation skipped for <500 nodes)
         for (let i = 0; i < nodes.length; i++) {
           for (let j = i + 1; j < nodes.length; j++) {
             const dx = nodes[i].x - nodes[j].x;
@@ -419,7 +581,6 @@
           }
         }
 
-        // Attraction (edges)
         for (const edge of edges) {
           const dx = nodes[edge.target].x - nodes[edge.source].x;
           const dy = nodes[edge.target].y - nodes[edge.source].y;
@@ -431,7 +592,6 @@
           forces[edge.target].y -= (dy / dist) * attraction;
         }
 
-        // Gravity
         for (let i = 0; i < nodes.length; i++) {
           const dist = Math.sqrt(nodes[i].x * nodes[i].x + nodes[i].y * nodes[i].y);
           if (dist > 0) {
@@ -440,7 +600,6 @@
           }
         }
 
-        // Apply forces
         const cooling = 1 - (iter / iterations) * 0.5;
         for (let i = 0; i < nodes.length; i++) {
           const speed = (1 / (1 + Math.sqrt(forces[i].x * forces[i].x + forces[i].y * forces[i].y))) * cooling / slowDown;
@@ -449,7 +608,6 @@
         }
       }
 
-      // Apply positions back to graph
       for (const node of nodes) {
         graph.setNodeAttribute(node.id, "x", node.x);
         graph.setNodeAttribute(node.id, "y", node.y);
@@ -459,7 +617,6 @@
     // ---- Render ----
 
     async function init() {
-      // Fetch schema and graph data in parallel
       const [schemaRes, graphRes] = await Promise.all([
         fetch("/api/schema"),
         fetch("/api/graph"),
@@ -467,34 +624,32 @@
       schemaData = await schemaRes.json();
       graphData = await graphRes.json();
 
-      // Pre-assign colors for all groups and prefixes so ordering is stable
-      const groups = [...new Set(graphData.nodes.map(n => n.group))].sort();
-      groups.forEach(g => assignColor(groupColors, g, PALETTE));
-      const prefixes = [...new Set(graphData.nodes.map(n => n.prefix))].sort();
-      prefixes.forEach(p => assignColor(prefixColors, p, PALETTE));
+      // Build hierarchical color map
+      const groupProps = schemaData.config?.GROUP_PROPS || ["channel"];
+      buildColorHierarchy(graphData.nodes, groupProps);
 
       // Update stats
-      const groupLabel = schemaData.config?.GROUP_PROP || "group";
+      const primaryLabel = groupProps[0] || "group";
+      const primaryGroups = [...new Set(graphData.nodes.map(n => {
+        const groups = n.groups || [n.group || "unknown"];
+        return groups[0] || "unknown";
+      }))];
       document.getElementById("node-count").textContent = graphData.nodes.length;
       document.getElementById("edge-count").textContent = graphData.edges.length;
-      document.getElementById("channel-count").textContent = groups.length;
-      document.getElementById("group-label").textContent = groupLabel + "s";
+      document.getElementById("channel-count").textContent = primaryGroups.length;
+      document.getElementById("group-label").textContent =
+        primaryLabel.charAt(0).toUpperCase() + primaryLabel.slice(1) + "s";
 
-      // Build Graphology graph
+      // Build graph
       graphInstance = buildGraph(graphData);
-
-      // Run layout
       runForceAtlas2(graphInstance, 400);
 
       // Build legend
-      buildLegend(graphData);
+      buildLegend(graphData, groupProps);
 
       // Initialize Sigma
       const container = document.getElementById("graph-container");
       sigmaInstance = new Sigma(graphInstance, container, {
-        edgeProgramClasses: {
-          curved: Sigma.rendering.EdgeCurveProgram,
-        },
         renderLabels: true,
         labelFont: "JetBrains Mono, SF Mono, monospace",
         labelSize: 11,
@@ -511,6 +666,13 @@
         zIndex: true,
         nodeReducer: (node, data) => {
           const res = { ...data };
+
+          // Group filtering
+          if (isNodeHidden(data)) {
+            res.hidden = true;
+            return res;
+          }
+
           if (data.hidden) { res.hidden = true; return res; }
 
           // Search mode
@@ -565,9 +727,17 @@
         },
         edgeReducer: (edge, data) => {
           const res = { ...data };
+          const [source, target] = graphInstance.extremities(edge);
+
+          // Hide edges connected to hidden nodes
+          const sourceAttrs = graphInstance.getNodeAttributes(source);
+          const targetAttrs = graphInstance.getNodeAttributes(target);
+          if (isNodeHidden(sourceAttrs) || isNodeHidden(targetAttrs)) {
+            res.hidden = true;
+            return res;
+          }
 
           if (searchMatches.size > 0) {
-            const [source, target] = graphInstance.extremities(edge);
             if (searchMatches.has(source) && searchMatches.has(target)) {
               res.color = "#06b6d4";
               res.size = 2;
@@ -582,7 +752,6 @@
 
           const active = selectedNode || hoveredNode;
           if (active) {
-            const [source, target] = graphInstance.extremities(edge);
             if (source === active || target === active) {
               res.color = brightenColor(data.color || "#2a2a3a", 2);
               res.size = Math.max(2, (data.size || 0.5) * 4);
@@ -615,24 +784,20 @@
           const width = textWidth + paddingX * 2;
           const radius = 5;
 
-          // Dark pill background
           context.fillStyle = "#12121c";
           context.beginPath();
           context.roundRect(x - width / 2, y - height / 2, width, height, radius);
           context.fill();
 
-          // Border in node color
           context.strokeStyle = data.color || "#7c3aed";
           context.lineWidth = 1.5;
           context.stroke();
 
-          // Label
           context.fillStyle = "#f5f5f7";
           context.textAlign = "center";
           context.textBaseline = "middle";
           context.fillText(fullName, x, y);
 
-          // Glow ring
           context.beginPath();
           context.arc(data.x, data.y, nodeSize + 3, 0, Math.PI * 2);
           context.strokeStyle = data.color || "#7c3aed";
@@ -720,9 +885,10 @@
 
       document.getElementById("detail-name").textContent = attrs._name || nodeId;
       const labelStr = (attrs._labels || []).join(", ");
-      const metaParts = [attrs._group, attrs._prefix].filter(Boolean).join(" / ");
+      const groups = attrs._groups || [attrs._group || "unknown"];
+      const groupStr = groups.filter(Boolean).join(" / ");
       document.getElementById("detail-meta").textContent =
-        `${metaParts}${labelStr ? "  [" + labelStr + "]" : ""}  |  ${attrs._degree || 0} connections  |  updated ${attrs._updated_at || "?"}`;
+        `${groupStr}${labelStr ? "  [" + labelStr + "]" : ""}  |  ${attrs._degree || 0} connections  |  updated ${attrs._updated_at || "?"}`;
 
       const desc = attrs._description || "";
       const descEl = document.getElementById("detail-desc");
@@ -737,6 +903,7 @@
           showMoreEl.textContent = isCollapsed ? "Show more" : "Show less";
         };
       } else {
+        descEl.classList.remove("collapsed");
         showMoreEl.style.display = "none";
       }
 
@@ -760,9 +927,7 @@
           selectedNode = targetNode;
           showDetail(targetNode);
 
-          // Animate camera to the node
           const targetAttrs = graphInstance.getNodeAttributes(targetNode);
-          const pos = sigmaInstance.graphToViewport({ x: targetAttrs.x, y: targetAttrs.y });
           sigmaInstance.getCamera().animate(
             { x: targetAttrs.x, y: targetAttrs.y, ratio: sigmaInstance.getCamera().ratio },
             { duration: 300 }
@@ -778,67 +943,149 @@
       document.getElementById("detail").classList.remove("visible");
     }
 
-    function buildLegend(data) {
+    function buildLegend(data, groupProps) {
       const legend = document.getElementById("legend");
       legend.innerHTML = "";
 
-      const groupLabel = schemaData?.config?.GROUP_PROP || "group";
+      const primaryLabel = groupProps[0] || "group";
+      const hasSubGroups = groupProps.length > 1;
 
-      // Group section (was "Channels" — now dynamic)
-      const groups = [...new Set(data.nodes.map(n => n.group))].sort();
-      const groupHeader = document.createElement("h3");
-      groupHeader.textContent = groupLabel.charAt(0).toUpperCase() + groupLabel.slice(1) + "s";
-      legend.appendChild(groupHeader);
-
-      for (const g of groups) {
-        const count = data.nodes.filter(n => n.group === g).length;
-        const item = document.createElement("div");
-        item.className = "legend-item";
-        item.innerHTML = `<span class="legend-dot" style="background: ${groupColors[g] || "#6b7280"}"></span> ${g} (${count})`;
-        legend.appendChild(item);
-      }
-
-      // Prefix section (top prefixes only)
-      const prefixCounts = {};
+      // Build hierarchy from data
+      const hierarchy = {}; // primary -> { sub -> count }
       for (const node of data.nodes) {
-        prefixCounts[node.prefix] = (prefixCounts[node.prefix] || 0) + 1;
-      }
-      const topPrefixes = Object.entries(prefixCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 12);
-
-      const prefixHeader = document.createElement("h3");
-      prefixHeader.textContent = "Node Types";
-      prefixHeader.style.marginTop = "10px";
-      legend.appendChild(prefixHeader);
-
-      for (const [prefix, count] of topPrefixes) {
-        const item = document.createElement("div");
-        item.className = "legend-item";
-        item.innerHTML = `<span class="legend-dot" style="background: ${prefixColors[prefix] || "#6b7280"}"></span> ${prefix} (${count})`;
-        legend.appendChild(item);
+        const groups = node.groups || [node.group || "unknown"];
+        const primary = groups[0] || "unknown";
+        if (!hierarchy[primary]) hierarchy[primary] = {};
+        if (hasSubGroups && groups.length > 1) {
+          const sub = groups.slice(1).filter(Boolean).join("/") || primary;
+          hierarchy[primary][sub] = (hierarchy[primary][sub] || 0) + 1;
+        } else {
+          hierarchy[primary]["_total"] = (hierarchy[primary]["_total"] || 0) + 1;
+        }
       }
 
-      // Edge types (top)
+      // Section header
+      const header = document.createElement("h3");
+      header.textContent = hasSubGroups
+        ? groupProps.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(" > ")
+        : primaryLabel.charAt(0).toUpperCase() + primaryLabel.slice(1) + "s";
+      legend.appendChild(header);
+
+      const sortedPrimaries = Object.keys(hierarchy).sort();
+
+      for (const primary of sortedPrimaries) {
+        const entry = groupHierarchy[primary];
+        const subs = hierarchy[primary];
+        const totalCount = Object.values(subs).reduce((a, b) => a + b, 0);
+        const subKeys = Object.keys(subs).filter(k => k !== "_total").sort();
+
+        if (!hasSubGroups || subKeys.length === 0) {
+          // Flat legend item (no sub-groups)
+          const item = document.createElement("div");
+          item.className = "legend-item";
+          const isHidden = hiddenGroups.has(primary);
+          if (isHidden) item.classList.add("dimmed");
+          item.innerHTML = `<span class="legend-dot" style="background: ${entry?.color || "#6b7280"}"></span> ${primary} (${totalCount})`;
+          item.addEventListener("click", () => {
+            if (hiddenGroups.has(primary)) {
+              hiddenGroups.delete(primary);
+              item.classList.remove("dimmed");
+            } else {
+              hiddenGroups.add(primary);
+              item.classList.add("dimmed");
+            }
+            sigmaInstance.refresh();
+          });
+          legend.appendChild(item);
+        } else {
+          // Nested group with sub-items
+          const groupDiv = document.createElement("div");
+          groupDiv.className = "legend-group";
+
+          const headerDiv = document.createElement("div");
+          headerDiv.className = "legend-group-header";
+          const isHidden = hiddenGroups.has(primary);
+          if (isHidden) headerDiv.classList.add("dimmed");
+          headerDiv.innerHTML = `<span class="toggle">&#9660;</span><span class="legend-dot" style="background: ${entry?.color || "#6b7280"}"></span> ${primary} (${totalCount})`;
+
+          const subsDiv = document.createElement("div");
+          subsDiv.className = "legend-sub-items";
+
+          // Click header: toggle entire group visibility
+          headerDiv.addEventListener("click", (e) => {
+            if (e.shiftKey) {
+              // Shift+click: expand/collapse sub-list
+              subsDiv.classList.toggle("collapsed");
+              const toggle = headerDiv.querySelector(".toggle");
+              toggle.innerHTML = subsDiv.classList.contains("collapsed") ? "&#9654;" : "&#9660;";
+            } else {
+              // Regular click: toggle visibility
+              if (hiddenGroups.has(primary)) {
+                hiddenGroups.delete(primary);
+                headerDiv.classList.remove("dimmed");
+                // Also unhide all sub-groups of this primary
+                for (const sub of subKeys) {
+                  hiddenSubGroups.delete(`${primary}/${sub}`);
+                }
+                subsDiv.querySelectorAll(".legend-item").forEach(el => el.classList.remove("dimmed"));
+              } else {
+                hiddenGroups.add(primary);
+                headerDiv.classList.add("dimmed");
+              }
+              sigmaInstance.refresh();
+            }
+          });
+
+          // Populate sub-items
+          for (const sub of subKeys) {
+            const subItem = document.createElement("div");
+            subItem.className = "legend-item";
+            const subColor = entry?.subs?.[sub] || entry?.color || "#6b7280";
+            const subKey = `${primary}/${sub}`;
+            if (hiddenSubGroups.has(subKey)) subItem.classList.add("dimmed");
+            subItem.innerHTML = `<span class="legend-dot" style="background: ${subColor}"></span> ${sub} (${subs[sub]})`;
+            subItem.addEventListener("click", (e) => {
+              e.stopPropagation();
+              if (hiddenSubGroups.has(subKey)) {
+                hiddenSubGroups.delete(subKey);
+                subItem.classList.remove("dimmed");
+              } else {
+                hiddenSubGroups.add(subKey);
+                subItem.classList.add("dimmed");
+              }
+              sigmaInstance.refresh();
+            });
+            subsDiv.appendChild(subItem);
+          }
+
+          groupDiv.appendChild(headerDiv);
+          groupDiv.appendChild(subsDiv);
+          legend.appendChild(groupDiv);
+        }
+      }
+
+      // Edge types section
       const edgeCounts = {};
       for (const edge of data.edges) {
         edgeCounts[edge.type] = (edgeCounts[edge.type] || 0) + 1;
       }
       const topEdges = Object.entries(edgeCounts)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 8);
+        .slice(0, 10);
 
-      const edgeHeader = document.createElement("h3");
-      edgeHeader.textContent = "Edge Types";
-      edgeHeader.style.marginTop = "10px";
-      legend.appendChild(edgeHeader);
+      if (topEdges.length > 0) {
+        const edgeHeader = document.createElement("h3");
+        edgeHeader.textContent = "Edge Types";
+        edgeHeader.style.marginTop = "10px";
+        legend.appendChild(edgeHeader);
 
-      for (const [type, count] of topEdges) {
-        const item = document.createElement("div");
-        item.className = "legend-item";
-        const color = edgeColors[type] || "#1a1a2a";
-        item.innerHTML = `<span class="legend-dot" style="background: ${brightenColor(color, 3)}"></span> ${type} (${count})`;
-        legend.appendChild(item);
+        for (const [type, count] of topEdges) {
+          const item = document.createElement("div");
+          item.className = "legend-item";
+          const color = edgeColors[type] || "#1a1a2a";
+          item.innerHTML = `<span class="legend-dot" style="background: ${brightenColor(color, 3)}"></span> ${type} (${count})`;
+          legend.appendChild(item);
+        }
       }
     }
 
