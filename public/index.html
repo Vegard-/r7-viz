@@ -723,9 +723,7 @@
       const scalingRatio = 15;
       const slowDown = 1;
       const theta = 1.2; // Barnes-Hut threshold (higher = faster, less accurate)
-      // Scale iterations for very large graphs
-      const effectiveIter = nodes.length > 2000 ? Math.min(iterations, 150) :
-                            nodes.length > 1000 ? Math.min(iterations, 250) : iterations;
+      const effectiveIter = iterations;
       const CHUNK_SIZE = Math.max(5, Math.min(30, Math.floor(150 / Math.max(1, nodes.length / 500))));
 
       for (let iter = 0; iter < effectiveIter; iter++) {
