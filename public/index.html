@@ -635,6 +635,61 @@
     }
 
 
+    // Barnes-Hut quadtree for O(n log n) repulsion
+    class BHNode {
+      constructor(x, y, w, h) {
+        this.x = x; this.y = y; this.w = w; this.h = h;
+        this.cx = 0; this.cy = 0; this.mass = 0; this.size = 0;
+        this.children = null;
+        this.bodyIdx = -1;
+      }
+      insert(idx, nx, ny, ns) {
+        if (this.mass === 0) {
+          this.bodyIdx = idx;
+          this.cx = nx; this.cy = ny; this.mass = 1; this.size = ns;
+          return;
+        }
+        if (!this.children) {
+          const hw = this.w / 2, hh = this.h / 2;
+          this.children = [
+            new BHNode(this.x, this.y, hw, hh),
+            new BHNode(this.x + hw, this.y, hw, hh),
+            new BHNode(this.x, this.y + hh, hw, hh),
+            new BHNode(this.x + hw, this.y + hh, hw, hh)
+          ];
+          this._place(this.bodyIdx, this.cx, this.cy, this.size);
+          this.bodyIdx = -1;
+        }
+        this._place(idx, nx, ny, ns);
+        const tm = this.mass + 1;
+        this.cx = (this.cx * this.mass + nx) / tm;
+        this.cy = (this.cy * this.mass + ny) / tm;
+        this.size = (this.size * this.mass + ns) / tm;
+        this.mass = tm;
+      }
+      _place(idx, nx, ny, ns) {
+        const hw = this.w / 2, hh = this.h / 2;
+        const col = nx < this.x + hw ? 0 : 1;
+        const row = ny < this.y + hh ? 0 : 1;
+        this.children[row * 2 + col].insert(idx, nx, ny, ns);
+      }
+      repulse(idx, nx, ny, ns, fx, theta, sr) {
+        if (this.mass === 0) return;
+        const dx = nx - this.cx, dy = ny - this.cy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < 0.0001) return;
+        if (!this.children || (this.w * this.w / d2 < theta * theta)) {
+          if (this.bodyIdx === idx) return;
+          const dist = Math.sqrt(d2);
+          const f = sr * ns * this.size * this.mass / dist;
+          fx.x += (dx / dist) * f;
+          fx.y += (dy / dist) * f;
+          return;
+        }
+        for (const c of this.children) c.repulse(idx, nx, ny, ns, fx, theta, sr);
+      }
+    }
+
     async function runForceAtlas2(graph, iterations = 300, onProgress) {
       const nodes = [];
       graph.forEachNode((id, attrs) => {
@@ -654,27 +709,34 @@
       const gravity = 0.8;
       const scalingRatio = 15;
       const slowDown = 1;
-      // Yield to event loop every CHUNK_SIZE iterations so the UI stays responsive
-      const CHUNK_SIZE = Math.max(10, Math.min(50, Math.floor(300 / Math.max(1, nodes.length / 500))));
+      const theta = 1.2; // Barnes-Hut threshold (higher = faster, less accurate)
+      // Scale iterations for very large graphs
+      const effectiveIter = nodes.length > 2000 ? Math.min(iterations, 150) :
+                            nodes.length > 1000 ? Math.min(iterations, 250) : iterations;
+      const CHUNK_SIZE = Math.max(5, Math.min(30, Math.floor(150 / Math.max(1, nodes.length / 500))));
 
-      for (let iter = 0; iter < iterations; iter++) {
+      for (let iter = 0; iter < effectiveIter; iter++) {
         const forces = nodes.map(() => ({ x: 0, y: 0 }));
 
+        // Build quadtree bounding box
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+          if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+        }
+        const pad = Math.max(maxX - minX, maxY - minY) * 0.01 + 1;
+        const side = Math.max(maxX - minX, maxY - minY) + pad * 2;
+        const tree = new BHNode(minX - pad, minY - pad, side, side);
         for (let i = 0; i < nodes.length; i++) {
-          for (let j = i + 1; j < nodes.length; j++) {
-            const dx = nodes[i].x - nodes[j].x;
-            const dy = nodes[i].y - nodes[j].y;
-            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
-            const repulsion = (scalingRatio * nodes[i].size * nodes[j].size) / dist;
-            const fx = (dx / dist) * repulsion;
-            const fy = (dy / dist) * repulsion;
-            forces[i].x += fx;
-            forces[i].y += fy;
-            forces[j].x -= fx;
-            forces[j].y -= fy;
-          }
+          tree.insert(i, nodes[i].x, nodes[i].y, nodes[i].size);
         }
 
+        // Repulsion via Barnes-Hut
+        for (let i = 0; i < nodes.length; i++) {
+          tree.repulse(i, nodes[i].x, nodes[i].y, nodes[i].size, forces[i], theta, scalingRatio);
+        }
+
+        // Attraction
         for (const edge of edges) {
           const dx = nodes[edge.target].x - nodes[edge.source].x;
           const dy = nodes[edge.target].y - nodes[edge.source].y;
@@ -686,6 +748,7 @@
           forces[edge.target].y -= (dy / dist) * attraction;
         }
 
+        // Gravity
         for (let i = 0; i < nodes.length; i++) {
           const dist = Math.sqrt(nodes[i].x * nodes[i].x + nodes[i].y * nodes[i].y);
           if (dist > 0) {
@@ -694,7 +757,8 @@
           }
         }
 
-        const cooling = 1 - (iter / iterations) * 0.5;
+        // Apply forces with cooling
+        const cooling = 1 - (iter / effectiveIter) * 0.5;
         for (let i = 0; i < nodes.length; i++) {
           const speed = (1 / (1 + Math.sqrt(forces[i].x * forces[i].x + forces[i].y * forces[i].y))) * cooling / slowDown;
           nodes[i].x += forces[i].x * speed;
@@ -703,7 +767,7 @@
 
         // Yield to event loop periodically for progress updates and UI responsiveness
         if (iter % CHUNK_SIZE === 0 && iter > 0) {
-          const pct = Math.round((iter / iterations) * 100);
+          const pct = Math.round((iter / effectiveIter) * 100);
           if (onProgress) onProgress(pct);
           await new Promise(r => requestAnimationFrame(r));
         }
