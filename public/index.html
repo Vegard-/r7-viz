@@ -650,6 +650,9 @@
       // Initialize Sigma
       const container = document.getElementById("graph-container");
       sigmaInstance = new Sigma(graphInstance, container, {
+        edgeProgramClasses: {
+          curved: Sigma.rendering.EdgeCurveProgram,
+        },
         renderLabels: true,
         labelFont: "JetBrains Mono, SF Mono, monospace",
         labelSize: 11,
