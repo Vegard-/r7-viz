@@ -206,6 +206,28 @@
     .edge-target { color: var(--text-primary); cursor: pointer; }
     .edge-target:hover { text-decoration: underline; }
 
+    /* Layout control buttons */
+    #layout-controls {
+      position: absolute;
+      top: 12px; left: 50%; transform: translateX(-50%);
+      display: flex;
+      gap: 6px;
+      z-index: 10;
+    }
+    .layout-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: opacity 0.2s, border-color 0.2s;
+    }
+    .layout-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+
     /* Search */
     #search-container {
       position: absolute;
@@ -264,6 +286,11 @@
     <div class="description collapsed" id="detail-desc"></div>
     <span class="show-more" id="detail-show-more" style="display:none"></span>
     <div class="edges-list" id="detail-edges"></div>
+  </div>
+
+  <div id="layout-controls">
+    <button id="reset-layout-btn" class="layout-btn">Reset positions</button>
+    <button id="tighten-btn" class="layout-btn">Tighten grouping</button>
   </div>
 
   <div id="search-container">
@@ -440,7 +467,7 @@
     // ---- State ----
     let selectedNode = null;
     let hoveredNode = null;
-    let searchMatches = new Set();
+    let searchMatches = new Map(); // node -> "name" | "desc"
     let graphData = null;
     let schemaData = null;
     let sigmaInstance = null;
@@ -614,6 +641,72 @@
       }
     }
 
+    // ---- Re-layout visible nodes ----
+
+    // Store original positions so we can reset
+    const originalPositions = {};
+
+    function saveOriginalPositions() {
+      graphInstance.forEachNode((node, attrs) => {
+        originalPositions[node] = { x: attrs.x, y: attrs.y };
+      });
+    }
+
+    function restoreOriginalPositions() {
+      graphInstance.forEachNode((node) => {
+        const pos = originalPositions[node];
+        if (pos) {
+          graphInstance.setNodeAttribute(node, "x", pos.x);
+          graphInstance.setNodeAttribute(node, "y", pos.y);
+        }
+      });
+      sigmaInstance.refresh();
+    }
+
+    function relayoutVisible() {
+      if (!graphInstance || !sigmaInstance) return;
+
+      // Build a subgraph of only visible nodes
+      const visibleNodes = [];
+      graphInstance.forEachNode((node, attrs) => {
+        if (!isNodeHidden(attrs)) {
+          visibleNodes.push(node);
+        }
+      });
+
+      if (visibleNodes.length === 0) return;
+
+      const visibleSet = new Set(visibleNodes);
+
+      // Create a temporary graph with only visible nodes
+      const tempGraph = new Graph();
+      for (const node of visibleNodes) {
+        const attrs = graphInstance.getNodeAttributes(node);
+        tempGraph.addNode(node, { x: attrs.x, y: attrs.y, size: attrs.size || 4 });
+      }
+
+      // Add edges between visible nodes
+      graphInstance.forEachEdge((edge, attrs, source, target) => {
+        if (visibleSet.has(source) && visibleSet.has(target)) {
+          try {
+            tempGraph.addEdge(source, target);
+          } catch (_) {}
+        }
+      });
+
+      // Run layout on the subgraph
+      runForceAtlas2(tempGraph, 400);
+
+      // Apply new positions back to the main graph
+      tempGraph.forEachNode((node, attrs) => {
+        graphInstance.setNodeAttribute(node, "x", attrs.x);
+        graphInstance.setNodeAttribute(node, "y", attrs.y);
+      });
+
+      sigmaInstance.refresh();
+    }
+
+
     // ---- Render ----
 
     async function init() {
@@ -643,6 +736,7 @@
       // Build graph
       graphInstance = buildGraph(graphData);
       runForceAtlas2(graphInstance, 400);
+      saveOriginalPositions();
 
       // Build legend
       buildLegend(graphData, groupProps);
@@ -680,11 +774,16 @@
 
           // Search mode
           if (searchMatches.size > 0) {
-            if (searchMatches.has(node)) {
+            const matchType = searchMatches.get(node);
+            if (matchType === "name") {
               res.color = "#06b6d4";
-              res.size = (data.size || 4) * 1.6;
-              res.zIndex = 2;
+              res.size = (data.size || 4) * 2.2;
+              res.zIndex = 3;
               res.highlighted = true;
+            } else if (matchType === "desc") {
+              res.color = "#0c4a5e";
+              res.size = (data.size || 4) * 0.9;
+              res.zIndex = 2;
             } else {
               res.color = dimColor(data.color || "#6b7280", 0.15);
               res.size = (data.size || 4) * 0.5;
@@ -841,28 +940,38 @@
       const searchInput = document.getElementById("search");
       searchInput.addEventListener("input", (e) => {
         const query = e.target.value.toLowerCase().trim();
-        searchMatches = new Set();
+        searchMatches = new Map();
         if (query.length >= 2) {
           graphInstance.forEachNode((node, attrs) => {
-            if (
-              node.toLowerCase().includes(query) ||
-              (attrs._description || "").toLowerCase().includes(query)
-            ) {
-              searchMatches.add(node);
+            if (node.toLowerCase().includes(query)) {
+              searchMatches.set(node, "name");
+            } else if ((attrs._description || "").toLowerCase().includes(query)) {
+              searchMatches.set(node, "desc");
             }
           });
         }
         sigmaInstance.refresh();
       });
 
+      // Layout control buttons
+      document.getElementById("reset-layout-btn").addEventListener("click", restoreOriginalPositions);
+      document.getElementById("tighten-btn").addEventListener("click", relayoutVisible);
+
       // Keyboard shortcuts
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           selectedNode = null;
           hoveredNode = null;
-          searchMatches = new Set();
+          searchMatches = new Map();
           searchInput.value = "";
+          hiddenGroups.clear();
+          hiddenSubGroups.clear();
+          restoreOriginalPositions();
           hideDetail();
+          // Reset legend dimming
+          document.querySelectorAll(".legend-item.dimmed, .legend-group-header.dimmed").forEach(
+            el => el.classList.remove("dimmed")
+          );
           nudgeCamera();
         }
         if (e.key === "/" && document.activeElement !== searchInput) {

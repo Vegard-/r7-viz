@@ -36,8 +36,7 @@ Open [http://localhost:3333](http://localhost:3333).
 | `GRAPH_NAME` | `r7` | Graph name to visualize |
 | `NAME_PROP` | `name` | Node property used as label |
 | `DESC_PROP` | `description` | Node property used for description |
-| `GROUP_PROP` | `channel` | Node property used for color grouping |
-| `GROUP_FALLBACK_PROP` | | Fallback grouping property when `GROUP_PROP` is absent |
+| `GROUP_PROPS` | `channel` | Comma-separated list of properties for multi-level color grouping (e.g. `channel,prefix`) |
 | `NODE_LABEL` | *(all)* | Graph label to query (empty = all labels) |
 | `PORT` | `3333` | HTTP server port |
 
