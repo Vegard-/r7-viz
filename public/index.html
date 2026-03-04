@@ -520,7 +520,7 @@
         const color = getNodeColor(node);
         const groups = node.groups || [node.group || "unknown"];
 
-        graph.addNode(node.id, {
+        graph.mergeNode(node.id, {
           label: node.name.length > 40 ? node.name.split(":").slice(-1)[0] : node.name,
           x: Math.cos(angle) * radius,
           y: Math.sin(angle) * radius,

@@ -69,9 +69,11 @@ async function fetchGraph() {
   );
 
   const nodes = [];
+  const seenNodes = new Set();
   for (const row of nodesResult.data || []) {
     const name = row.name || "";
-    if (!name) continue;
+    if (!name || seenNodes.has(name)) continue;
+    seenNodes.add(name);
     const description = row.description || "";
     const nodeLabels = row.labels || [];
     const allProps = row.all_props || {};
