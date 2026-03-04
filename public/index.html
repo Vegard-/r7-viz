@@ -567,7 +567,6 @@
             size: edge.type === "TENSION" ? 2 : 0.5,
             type: "curved",
             curvature: curvature,
-            label: edge.type,
             _relType: edge.type,
             _context: edge.context,
           });
@@ -849,9 +848,6 @@
         renderEdgeLabels: true,
         edgeLabelSize: 9,
         edgeLabelColor: { color: "#5a5a70" },
-        // Hide edge labels by default — only show via forceLabel on hover/select/focus.
-        // Keeps the rendering engine lightweight when navigating.
-        edgeLabelRenderedSizeThreshold: 9999,
         nodeReducer: (node, data) => {
           const res = { ...data };
 
@@ -972,6 +968,7 @@
               res.color = brightenColor(data.color || "#2a2a3a", 2);
               res.size = Math.max(2, (data.size || 0.5) * 3);
               res.zIndex = 2;
+              res.label = data._relType || "";
               res.forceLabel = true;
             } else {
               res.hidden = true;
@@ -991,6 +988,7 @@
               res.color = "#ef4444";
               res.size = 4;
               res.zIndex = 10;
+              res.label = data._relType || "";
               res.forceLabel = true;
             } else {
               res.color = dimColor(data.color || "#1a1a2a", 0.08);
@@ -1005,6 +1003,7 @@
               res.color = "#06b6d4";
               res.size = 2;
               res.zIndex = 2;
+              res.label = data._relType || "";
               res.forceLabel = true;
             } else {
               res.color = dimColor(data.color || "#1a1a2a", 0.05);
@@ -1020,6 +1019,7 @@
               res.color = brightenColor(data.color || "#2a2a3a", 2);
               res.size = Math.max(2, (data.size || 0.5) * 4);
               res.zIndex = 2;
+              res.label = data._relType || "";
               res.forceLabel = true;
             } else {
               res.color = dimColor(data.color || "#1a1a2a", 0.08);
