@@ -318,6 +318,12 @@
     <button id="refresh-btn" class="layout-btn" title="Re-fetch graph data">&#x21BB;</button>
     <button id="reset-layout-btn" class="layout-btn">Reset positions</button>
     <button id="tighten-btn" class="layout-btn">Tighten grouping</button>
+    <select id="tighten-intensity" style="background:var(--surface); color:var(--text-secondary); border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:10px; font-family:inherit; cursor:pointer;">
+      <option value="1">1x</option>
+      <option value="2">2x</option>
+      <option value="4" selected>4x</option>
+      <option value="8">8x</option>
+    </select>
     <button id="tensions-btn" class="layout-btn" title="Highlight TENSION edges">Tensions</button>
   </div>
 
@@ -838,9 +844,11 @@
         }
       });
 
-      // Run layout on the subgraph
-      await runForceAtlas2(tempGraph, 400, (pct) => {
-        updateProgress(pct, `Tightening... ${pct}%`);
+      // Run layout on the subgraph with configurable intensity
+      const intensity = parseInt(document.getElementById("tighten-intensity").value) || 4;
+      const tightenIter = 100 * intensity;
+      await runForceAtlas2(tempGraph, tightenIter, (pct) => {
+        updateProgress(pct, `Tightening ${intensity}x... ${pct}%`);
       });
 
       // Apply new positions back to the main graph
