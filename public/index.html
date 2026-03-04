@@ -849,7 +849,9 @@
         renderEdgeLabels: true,
         edgeLabelSize: 9,
         edgeLabelColor: { color: "#5a5a70" },
-        edgeLabelRenderedSizeThreshold: 20,
+        // Hide edge labels by default — only show via forceLabel on hover/select/focus.
+        // Keeps the rendering engine lightweight when navigating.
+        edgeLabelRenderedSizeThreshold: 9999,
         nodeReducer: (node, data) => {
           const res = { ...data };
 
