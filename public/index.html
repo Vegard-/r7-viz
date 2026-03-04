@@ -288,7 +288,10 @@
 
   <div id="loading">
     <div class="spinner"></div>
-    <span>Loading graph...</span>
+    <span id="loading-text">Loading graph...</span>
+    <div id="progress-bar" style="display:none; width:160px; height:4px; background:var(--border); border-radius:2px; margin-left:16px; overflow:hidden;">
+      <div id="progress-fill" style="width:0%; height:100%; background:var(--accent); border-radius:2px; transition:width 0.15s;"></div>
+    </div>
   </div>
 
   <div id="stats">
@@ -599,7 +602,33 @@
 
     // ---- ForceAtlas2 ----
 
-    function runForceAtlas2(graph, iterations = 300) {
+    // ---- Progress overlay helpers ----
+
+    function showProgress(text) {
+      const el = document.getElementById("loading");
+      const textEl = document.getElementById("loading-text");
+      const bar = document.getElementById("progress-bar");
+      const fill = document.getElementById("progress-fill");
+      textEl.textContent = text;
+      bar.style.display = "block";
+      fill.style.width = "0%";
+      el.classList.remove("hidden");
+    }
+
+    function updateProgress(pct, text) {
+      const fill = document.getElementById("progress-fill");
+      const textEl = document.getElementById("loading-text");
+      fill.style.width = pct + "%";
+      if (text) textEl.textContent = text;
+    }
+
+    function hideProgress() {
+      const el = document.getElementById("loading");
+      el.classList.add("hidden");
+      document.getElementById("progress-bar").style.display = "none";
+    }
+
+    async function runForceAtlas2(graph, iterations = 300, onProgress) {
       const nodes = [];
       graph.forEachNode((id, attrs) => {
         nodes.push({ id, x: attrs.x, y: attrs.y, size: attrs.size || 4 });
@@ -618,6 +647,8 @@
       const gravity = 0.8;
       const scalingRatio = 15;
       const slowDown = 1;
+      // Yield to event loop every CHUNK_SIZE iterations so the UI stays responsive
+      const CHUNK_SIZE = Math.max(10, Math.min(50, Math.floor(300 / Math.max(1, nodes.length / 500))));
 
       for (let iter = 0; iter < iterations; iter++) {
         const forces = nodes.map(() => ({ x: 0, y: 0 }));
@@ -662,6 +693,13 @@
           nodes[i].x += forces[i].x * speed;
           nodes[i].y += forces[i].y * speed;
         }
+
+        // Yield to event loop periodically for progress updates and UI responsiveness
+        if (iter % CHUNK_SIZE === 0 && iter > 0) {
+          const pct = Math.round((iter / iterations) * 100);
+          if (onProgress) onProgress(pct);
+          await new Promise(r => requestAnimationFrame(r));
+        }
       }
 
       for (const node of nodes) {
@@ -692,7 +730,7 @@
       sigmaInstance.refresh();
     }
 
-    function relayoutVisible() {
+    async function relayoutVisible() {
       if (!graphInstance || !sigmaInstance) return;
 
       // Build a subgraph of only visible nodes
@@ -704,6 +742,10 @@
       });
 
       if (visibleNodes.length === 0) return;
+
+      const btn = document.getElementById("tighten-btn");
+      btn.disabled = true;
+      showProgress("Tightening layout...");
 
       const visibleSet = new Set(visibleNodes);
 
@@ -724,7 +766,9 @@
       });
 
       // Run layout on the subgraph
-      runForceAtlas2(tempGraph, 400);
+      await runForceAtlas2(tempGraph, 400, (pct) => {
+        updateProgress(pct, `Tightening... ${pct}%`);
+      });
 
       // Apply new positions back to the main graph
       tempGraph.forEachNode((node, attrs) => {
@@ -732,6 +776,8 @@
         graphInstance.setNodeAttribute(node, "y", attrs.y);
       });
 
+      hideProgress();
+      btn.disabled = false;
       sigmaInstance.refresh();
     }
 
@@ -743,6 +789,7 @@
       const origText = btn.innerHTML;
       btn.textContent = "...";
       btn.disabled = true;
+      showProgress("Fetching data...");
       try {
         const [schemaRes, graphRes] = await Promise.all([
           fetch("/api/schema"),
@@ -750,6 +797,8 @@
         ]);
         schemaData = await schemaRes.json();
         graphData = await graphRes.json();
+
+        updateProgress(20, "Building graph...");
 
         // Clear caches
         for (const k in nodeColorCache) delete nodeColorCache[k];
@@ -760,7 +809,10 @@
 
         // Rebuild graph in place (Sigma observes mutations)
         buildGraph(graphData, graphInstance);
-        runForceAtlas2(graphInstance, 400);
+        updateProgress(30, "Laying out...");
+        await runForceAtlas2(graphInstance, 400, (pct) => {
+          updateProgress(30 + Math.round(pct * 0.65), `Laying out... ${pct}%`);
+        });
         saveOriginalPositions();
 
         // Update stats
@@ -786,6 +838,7 @@
       } catch (err) {
         console.error("Refresh failed:", err);
       } finally {
+        hideProgress();
         btn.innerHTML = origText;
         btn.disabled = false;
       }
@@ -794,6 +847,7 @@
     // ---- Render ----
 
     async function init() {
+      showProgress("Fetching data...");
       const [schemaRes, graphRes] = await Promise.all([
         fetch("/api/schema"),
         fetch("/api/graph"),
@@ -818,8 +872,12 @@
         primaryLabel.charAt(0).toUpperCase() + primaryLabel.slice(1) + "s";
 
       // Build graph
+      updateProgress(20, "Building graph...");
       graphInstance = buildGraph(graphData);
-      runForceAtlas2(graphInstance, 400);
+      updateProgress(30, "Laying out...");
+      await runForceAtlas2(graphInstance, 400, (pct) => {
+        updateProgress(30 + Math.round(pct * 0.65), `Laying out... ${pct}%`);
+      });
       saveOriginalPositions();
 
       // Build legend
@@ -1231,7 +1289,7 @@
       });
 
       // Hide loading
-      document.getElementById("loading").classList.add("hidden");
+      hideProgress();
     }
 
     function nudgeCamera() {
