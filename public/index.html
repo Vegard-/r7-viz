@@ -246,6 +246,7 @@
     }
     .layout-btn:hover { border-color: var(--accent); color: var(--text-primary); }
     .layout-btn.active { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+    #heat-btn.active { border-color: #f97316; color: #f97316; background: rgba(249, 115, 22, 0.1); }
 
     /* Search */
     #search-container {
@@ -266,6 +267,58 @@
     }
     #search:focus { border-color: var(--accent); }
     #search::placeholder { color: var(--text-muted); }
+
+    /* Path mode status */
+    #path-status {
+      position: absolute;
+      bottom: 52px; right: 12px;
+      background: rgba(6, 182, 212, 0.15);
+      border: 1px solid rgba(6, 182, 212, 0.4);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 11px;
+      color: #06b6d4;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+    #path-status.visible { display: block; }
+    #path-status .path-hint { color: var(--text-muted); }
+    #path-status .path-length { color: var(--text-primary); font-weight: 600; }
+
+    /* Heat legend */
+    #heat-legend {
+      position: absolute;
+      bottom: 52px; left: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 10px;
+      color: var(--text-secondary);
+      z-index: 10;
+      display: none;
+      backdrop-filter: blur(8px);
+    }
+    #heat-legend h4 {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .heat-tier {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 2px 0;
+    }
+    .heat-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
 
     /* Scrollbar styling */
     #legend::-webkit-scrollbar,
@@ -305,7 +358,7 @@
   <div id="detail">
     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
       <h2 id="detail-name" style="flex:1;"></h2>
-      <button id="focus-btn" class="layout-btn" style="font-size:10px; padding:3px 10px; flex-shrink:0;" title="Show only this node and its neighbors (or double-click node)">Focus</button>
+      <button id="focus-btn" class="layout-btn" style="font-size:10px; padding:3px 10px; flex-shrink:0;" title="Focus: cycle 1-hop → 2-hop → 3-hop → off (or double-click node)">Focus</button>
     </div>
     <div class="meta" id="detail-meta"></div>
     <div class="description collapsed" id="detail-desc"></div>
@@ -317,8 +370,16 @@
   <div id="layout-controls">
     <button id="refresh-btn" class="layout-btn" title="Re-fetch graph data">&#x21BB;</button>
     <button id="reset-layout-btn" class="layout-btn">Reset positions</button>
-    <button id="tighten-btn" class="layout-btn">Tighten grouping</button>
-    <select id="tighten-intensity" style="background:var(--surface); color:var(--text-secondary); border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:10px; font-family:inherit; cursor:pointer;">
+    <button id="tighten-btn" class="layout-btn">Tighten</button>
+    <select id="tighten-method" style="background:var(--surface); color:var(--text-secondary); border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:10px; font-family:inherit; cursor:pointer;" title="Layout method">
+      <option value="forceatlas2">ForceAtlas2</option>
+      <option value="group-attract" selected>Group-Attract</option>
+      <option value="fruchterman">Fruchterman-Reingold</option>
+      <option value="circular">Circular by Group</option>
+      <option value="radial">Radial by Group</option>
+      <option value="grid">Grid by Group</option>
+    </select>
+    <select id="tighten-intensity" style="background:var(--surface); color:var(--text-secondary); border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:10px; font-family:inherit; cursor:pointer;" title="Intensity">
       <option value="1">1x</option>
       <option value="2">2x</option>
       <option value="4" selected>4x</option>
@@ -331,7 +392,23 @@
       <option value="512">512x</option>
       <option value="1024">1024x</option>
     </select>
-    <button id="tensions-btn" class="layout-btn" title="Highlight TENSION edges">Tensions</button>
+    <button id="tensions-btn" class="layout-btn" title="Highlight TENSION and NEAR_MISS edges">Tensions</button>
+    <button id="heat-btn" class="layout-btn" title="Color nodes by recency of update (heat map)">Heat</button>
+    <button id="path-btn" class="layout-btn" title="Find shortest path between two nodes (Shift+click)">Path</button>
+  </div>
+
+  <div id="path-status">
+    <span id="path-status-text"></span>
+  </div>
+
+  <div id="heat-legend">
+    <h4>Recency</h4>
+    <div class="heat-tier"><span class="heat-dot" style="background:#ef4444"></span> &lt; 6 hours</div>
+    <div class="heat-tier"><span class="heat-dot" style="background:#f97316"></span> &lt; 24 hours</div>
+    <div class="heat-tier"><span class="heat-dot" style="background:#eab308"></span> &lt; 3 days</div>
+    <div class="heat-tier"><span class="heat-dot" style="background:#22c55e"></span> &lt; 1 week</div>
+    <div class="heat-tier"><span class="heat-dot" style="background:#06b6d4"></span> &lt; 1 month</div>
+    <div class="heat-tier"><span class="heat-dot" style="background:#475569"></span> &gt; 1 month</div>
   </div>
 
   <div id="search-container">
@@ -520,6 +597,34 @@
     const hiddenEdgeTypes = new Set(); // edge types to hide
     let highlightTensions = false;     // TENSION edge highlight mode
     let focusedNeighborhood = null;    // node ID whose neighborhood is isolated
+    let focusDepth = 1;                // 1, 2, or 3 hops
+    let focusedSet = null;             // cached Set of nodes in n-hop neighborhood
+    let pathMode = false;              // path finding mode active
+    let pathSource = null;             // source node for path finding
+    let pathTarget = null;             // target node for path finding
+    let pathNodes = new Set();         // nodes in the found path
+    let pathEdges = new Set();         // edge IDs in the found path
+    let shiftHeld = false;             // track Shift key state globally
+    let heatMode = false;              // temporal heat map mode
+
+    // ---- Heat map coloring ----
+    const HEAT_GRADIENT = [
+      { maxAge: 6 * 3600000,    color: "#ef4444", label: "< 6h" },    // hot red
+      { maxAge: 24 * 3600000,   color: "#f97316", label: "< 24h" },   // orange
+      { maxAge: 3 * 86400000,   color: "#eab308", label: "< 3d" },    // yellow
+      { maxAge: 7 * 86400000,   color: "#22c55e", label: "< 1w" },    // green
+      { maxAge: 30 * 86400000,  color: "#06b6d4", label: "< 1mo" },   // cyan
+      { maxAge: Infinity,       color: "#475569", label: "> 1mo" },    // slate
+    ];
+
+    function getHeatColor(updatedAt) {
+      if (!updatedAt) return HEAT_GRADIENT[HEAT_GRADIENT.length - 1].color;
+      const age = Date.now() - new Date(updatedAt).getTime();
+      for (const tier of HEAT_GRADIENT) {
+        if (age < tier.maxAge) return tier.color;
+      }
+      return HEAT_GRADIENT[HEAT_GRADIENT.length - 1].color;
+    }
 
     // ---- Build graph ----
 
@@ -579,8 +684,9 @@
 
         try {
           graph.addEdgeWithKey(`e${edgeIdx}`, edge.source, edge.target, {
+            label: edge.type,
             color: edgeColor,
-            size: edge.type === "TENSION" ? 2 : 0.5,
+            size: edge.type === "TENSION" ? 2 : edge.type === "NEAR_MISS" ? 1.5 : 0.5,
             type: "curved",
             curvature: curvature,
             _relType: edge.type,
@@ -611,6 +717,172 @@
       }
 
       return false;
+    }
+
+    // ---- Path finding ----
+
+    function findShortestPath(graph, source, target) {
+      if (source === target) return { nodes: [source], edges: [] };
+
+      const visited = new Set([source]);
+      const parent = new Map();
+      const queue = [source];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+
+        for (const neighbor of graph.neighbors(current)) {
+          if (visited.has(neighbor)) continue;
+          if (isNodeHidden(graph.getNodeAttributes(neighbor))) continue;
+
+          visited.add(neighbor);
+
+          // Find the connecting edge
+          let edgeId = null;
+          graph.forEachEdge(current, (e, attrs, src, tgt) => {
+            if (!edgeId && ((src === current && tgt === neighbor) || (src === neighbor && tgt === current))) {
+              edgeId = e;
+            }
+          });
+
+          parent.set(neighbor, { node: current, edge: edgeId });
+
+          if (neighbor === target) {
+            const nodePath = [target];
+            const edgePath = [];
+            let curr = target;
+            while (parent.has(curr)) {
+              const p = parent.get(curr);
+              if (p.edge) edgePath.unshift(p.edge);
+              nodePath.unshift(p.node);
+              curr = p.node;
+            }
+            return { nodes: nodePath, edges: edgePath };
+          }
+
+          queue.push(neighbor);
+        }
+      }
+
+      return null;
+    }
+
+    // ---- N-hop neighborhood ----
+    function computeFocusedSet(graph, center, depth) {
+      const visited = new Set([center]);
+      let frontier = [center];
+      for (let d = 0; d < depth; d++) {
+        const nextFrontier = [];
+        for (const node of frontier) {
+          graph.neighbors(node).forEach(n => {
+            if (!visited.has(n)) {
+              const attrs = graph.getNodeAttributes(n);
+              if (!attrs.hidden && !isNodeHidden(attrs)) {
+                visited.add(n);
+                nextFrontier.push(n);
+              }
+            }
+          });
+        }
+        frontier = nextFrontier;
+        if (frontier.length === 0) break; // no more to expand
+      }
+      return visited;
+    }
+
+    function updateFocusedSet() {
+      if (focusedNeighborhood && graphInstance) {
+        focusedSet = computeFocusedSet(graphInstance, focusedNeighborhood, focusDepth);
+      } else {
+        focusedSet = null;
+      }
+    }
+
+    function setPathStatus(text) {
+      const el = document.getElementById("path-status");
+      const textEl = document.getElementById("path-status-text");
+      if (text) {
+        textEl.innerHTML = text;
+        el.classList.add("visible");
+      } else {
+        el.classList.remove("visible");
+      }
+    }
+
+    function clearPath() {
+      pathSource = null;
+      pathTarget = null;
+      pathNodes = new Set();
+      pathEdges = new Set();
+      setPathStatus(null);
+    }
+
+    function enterPathMode() {
+      pathMode = true;
+      clearPath();
+      document.getElementById("path-btn").classList.add("active");
+      setPathStatus('<span class="path-hint">Click source node...</span>');
+      if (sigmaInstance) sigmaInstance.refresh();
+    }
+
+    function exitPathMode() {
+      pathMode = false;
+      clearPath();
+      document.getElementById("path-btn").classList.remove("active");
+      if (sigmaInstance) sigmaInstance.refresh();
+    }
+
+    function showPathInDetail(result) {
+      const panel = document.getElementById("detail");
+      const nameEl = document.getElementById("detail-name");
+      const metaEl = document.getElementById("detail-meta");
+      const descEl = document.getElementById("detail-desc");
+      const showMoreEl = document.getElementById("detail-show-more");
+      const propsDiv = document.getElementById("detail-props");
+      const edgesDiv = document.getElementById("detail-edges");
+
+      nameEl.textContent = `Path: ${result.nodes[0]} → ${result.nodes[result.nodes.length - 1]}`;
+      metaEl.textContent = `${result.nodes.length} nodes, ${result.edges.length} hops`;
+
+      // Build path description
+      const lines = [];
+      for (let i = 0; i < result.nodes.length; i++) {
+        const node = result.nodes[i];
+        const attrs = graphInstance.getNodeAttributes(node);
+        lines.push(`${i + 1}. ${node}`);
+        if (i < result.edges.length) {
+          const edgeAttrs = graphInstance.getEdgeAttributes(result.edges[i]);
+          const [src] = graphInstance.extremities(result.edges[i]);
+          const arrow = src === node ? "→" : "←";
+          lines.push(`   ${arrow} ${edgeAttrs._relType}${edgeAttrs._context ? " (" + edgeAttrs._context.slice(0, 60) + ")" : ""}`);
+        }
+      }
+      descEl.textContent = lines.join("\n");
+      descEl.classList.remove("collapsed");
+      showMoreEl.style.display = "none";
+      propsDiv.innerHTML = "";
+
+      // Make path nodes clickable
+      edgesDiv.innerHTML = "<h4 style='font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;'>Path Nodes</h4>";
+      for (const node of result.nodes) {
+        const item = document.createElement("div");
+        item.className = "edge-item";
+        item.innerHTML = `<span class="edge-target" data-node="${node}">${node}</span>`;
+        edgesDiv.appendChild(item);
+      }
+
+      edgesDiv.querySelectorAll(".edge-target").forEach(el => {
+        el.addEventListener("click", () => {
+          const targetNode = el.dataset.node;
+          const targetAttrs = graphInstance.getNodeAttributes(targetNode);
+          sigmaInstance.getCamera().animate(
+            { x: targetAttrs.x, y: targetAttrs.y, ratio: sigmaInstance.getCamera().ratio },
+            { duration: 300 }
+          );
+        });
+      });
+
+      panel.classList.add("visible");
     }
 
     // ---- ForceAtlas2 ----
@@ -790,6 +1062,279 @@
       }
     }
 
+    // ---- Alternative layout algorithms ----
+
+    // Group-Attract: ForceAtlas2 + extra intra-group attraction
+    async function runGroupAttract(graph, iterations, onProgress) {
+      const nodes = [];
+      graph.forEachNode((id, attrs) => {
+        nodes.push({ id, x: attrs.x, y: attrs.y, size: attrs.size || 4 });
+      });
+      const nodeIndex = {};
+      nodes.forEach((n, i) => nodeIndex[n.id] = i);
+
+      // Build group map from main graph
+      const nodeGroup = {};
+      for (const n of nodes) {
+        const attrs = graphInstance.getNodeAttributes(n.id);
+        nodeGroup[n.id] = (attrs._groups || [attrs._group || "unknown"])[0];
+      }
+
+      const edges = [];
+      graph.forEachEdge((edge, attrs, source, target) => {
+        if (nodeIndex[source] !== undefined && nodeIndex[target] !== undefined) {
+          edges.push({ source: nodeIndex[source], target: nodeIndex[target] });
+        }
+      });
+
+      const gravity = 0.8;
+      const scalingRatio = 15;
+      const groupAttraction = 0.15;
+      const theta = 1.2;
+      const CHUNK_SIZE = Math.max(5, Math.min(30, Math.floor(150 / Math.max(1, nodes.length / 500))));
+
+      for (let iter = 0; iter < iterations; iter++) {
+        const forces = nodes.map(() => ({ x: 0, y: 0 }));
+
+        // Compute group centroids
+        const groupCentroids = {};
+        const groupCounts = {};
+        for (let i = 0; i < nodes.length; i++) {
+          const g = nodeGroup[nodes[i].id];
+          if (!groupCentroids[g]) { groupCentroids[g] = { x: 0, y: 0 }; groupCounts[g] = 0; }
+          groupCentroids[g].x += nodes[i].x;
+          groupCentroids[g].y += nodes[i].y;
+          groupCounts[g]++;
+        }
+        for (const g in groupCentroids) {
+          groupCentroids[g].x /= groupCounts[g];
+          groupCentroids[g].y /= groupCounts[g];
+        }
+
+        // Barnes-Hut repulsion
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+          if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+        }
+        const pad = Math.max(maxX - minX, maxY - minY) * 0.01 + 1;
+        const side = Math.max(maxX - minX, maxY - minY) + pad * 2;
+        const tree = new BHNode(minX - pad, minY - pad, side, side);
+        for (let i = 0; i < nodes.length; i++) {
+          tree.insert(i, nodes[i].x, nodes[i].y, nodes[i].size);
+        }
+        for (let i = 0; i < nodes.length; i++) {
+          tree.repulse(i, nodes[i].x, nodes[i].y, nodes[i].size, forces[i], theta, scalingRatio);
+        }
+
+        // Edge attraction
+        for (const edge of edges) {
+          const dx = nodes[edge.target].x - nodes[edge.source].x;
+          const dy = nodes[edge.target].y - nodes[edge.source].y;
+          const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+          const attraction = dist / scalingRatio;
+          forces[edge.source].x += (dx / dist) * attraction;
+          forces[edge.source].y += (dy / dist) * attraction;
+          forces[edge.target].x -= (dx / dist) * attraction;
+          forces[edge.target].y -= (dy / dist) * attraction;
+        }
+
+        // Gravity + group attraction
+        for (let i = 0; i < nodes.length; i++) {
+          const dist = Math.sqrt(nodes[i].x * nodes[i].x + nodes[i].y * nodes[i].y);
+          if (dist > 0) {
+            forces[i].x -= gravity * nodes[i].x / dist * nodes[i].size;
+            forces[i].y -= gravity * nodes[i].y / dist * nodes[i].size;
+          }
+          // Pull toward group centroid
+          const g = nodeGroup[nodes[i].id];
+          const c = groupCentroids[g];
+          if (c) {
+            forces[i].x += groupAttraction * (c.x - nodes[i].x);
+            forces[i].y += groupAttraction * (c.y - nodes[i].y);
+          }
+        }
+
+        const cooling = 1 - (iter / iterations) * 0.5;
+        for (let i = 0; i < nodes.length; i++) {
+          const speed = (1 / (1 + Math.sqrt(forces[i].x * forces[i].x + forces[i].y * forces[i].y))) * cooling;
+          nodes[i].x += forces[i].x * speed;
+          nodes[i].y += forces[i].y * speed;
+        }
+
+        if (iter % CHUNK_SIZE === 0 && iter > 0) {
+          const pct = Math.round((iter / iterations) * 100);
+          if (onProgress) onProgress(pct);
+          await new Promise(r => requestAnimationFrame(r));
+        }
+      }
+
+      for (const node of nodes) {
+        graph.setNodeAttribute(node.id, "x", node.x);
+        graph.setNodeAttribute(node.id, "y", node.y);
+      }
+    }
+
+    // Fruchterman-Reingold: classic spring-electrical model with uniform spacing
+    async function runFruchtermanReingold(graph, iterations, onProgress) {
+      const nodes = [];
+      graph.forEachNode((id, attrs) => {
+        nodes.push({ id, x: attrs.x, y: attrs.y });
+      });
+      const nodeIndex = {};
+      nodes.forEach((n, i) => nodeIndex[n.id] = i);
+
+      const edges = [];
+      graph.forEachEdge((edge, attrs, source, target) => {
+        if (nodeIndex[source] !== undefined && nodeIndex[target] !== undefined) {
+          edges.push({ source: nodeIndex[source], target: nodeIndex[target] });
+        }
+      });
+
+      const area = nodes.length * 100;
+      const k = Math.sqrt(area / Math.max(nodes.length, 1));
+      let temperature = Math.sqrt(area) * 0.1;
+      const CHUNK_SIZE = Math.max(5, Math.min(30, Math.floor(150 / Math.max(1, nodes.length / 500))));
+
+      for (let iter = 0; iter < iterations; iter++) {
+        const disp = nodes.map(() => ({ x: 0, y: 0 }));
+
+        // Repulsion between all pairs (O(n^2) — fine for our graph sizes)
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const dx = nodes[i].x - nodes[j].x;
+            const dy = nodes[i].y - nodes[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+            const force = (k * k) / dist;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            disp[i].x += fx; disp[i].y += fy;
+            disp[j].x -= fx; disp[j].y -= fy;
+          }
+        }
+
+        // Attraction along edges
+        for (const edge of edges) {
+          const dx = nodes[edge.target].x - nodes[edge.source].x;
+          const dy = nodes[edge.target].y - nodes[edge.source].y;
+          const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+          const force = (dist * dist) / k;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          disp[edge.source].x += fx; disp[edge.source].y += fy;
+          disp[edge.target].x -= fx; disp[edge.target].y -= fy;
+        }
+
+        // Apply with temperature limiting
+        for (let i = 0; i < nodes.length; i++) {
+          const dist = Math.sqrt(disp[i].x * disp[i].x + disp[i].y * disp[i].y) + 0.01;
+          const cappedDist = Math.min(dist, temperature);
+          nodes[i].x += (disp[i].x / dist) * cappedDist;
+          nodes[i].y += (disp[i].y / dist) * cappedDist;
+        }
+
+        temperature *= (1 - iter / iterations);
+
+        if (iter % CHUNK_SIZE === 0 && iter > 0) {
+          const pct = Math.round((iter / iterations) * 100);
+          if (onProgress) onProgress(pct);
+          await new Promise(r => requestAnimationFrame(r));
+        }
+      }
+
+      for (const node of nodes) {
+        graph.setNodeAttribute(node.id, "x", node.x);
+        graph.setNodeAttribute(node.id, "y", node.y);
+      }
+    }
+
+    // Circular by Group: each group forms a circle, groups arranged in a ring
+    function layoutCircularByGroup(graph) {
+      const groups = {};
+      graph.forEachNode((id, attrs) => {
+        const mainAttrs = graphInstance.getNodeAttributes(id);
+        const g = (mainAttrs._groups || [mainAttrs._group || "unknown"])[0];
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(id);
+      });
+
+      const groupNames = Object.keys(groups).sort();
+      const outerRadius = Math.max(80, groupNames.length * 60);
+
+      groupNames.forEach((g, gi) => {
+        const groupAngle = (2 * Math.PI * gi) / groupNames.length;
+        const cx = Math.cos(groupAngle) * outerRadius;
+        const cy = Math.sin(groupAngle) * outerRadius;
+        const members = groups[g];
+        const innerRadius = Math.max(20, members.length * 8);
+
+        members.forEach((id, ni) => {
+          const nodeAngle = (2 * Math.PI * ni) / members.length;
+          graph.setNodeAttribute(id, "x", cx + Math.cos(nodeAngle) * innerRadius);
+          graph.setNodeAttribute(id, "y", cy + Math.sin(nodeAngle) * innerRadius);
+        });
+      });
+    }
+
+    // Radial by Group: groups on spokes radiating from center
+    function layoutRadialByGroup(graph) {
+      const groups = {};
+      graph.forEachNode((id, attrs) => {
+        const mainAttrs = graphInstance.getNodeAttributes(id);
+        const g = (mainAttrs._groups || [mainAttrs._group || "unknown"])[0];
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(id);
+      });
+
+      const groupNames = Object.keys(groups).sort();
+
+      groupNames.forEach((g, gi) => {
+        const spokeAngle = (2 * Math.PI * gi) / groupNames.length;
+        const members = groups[g];
+        const spread = Math.PI * 0.15; // angular spread within spoke
+
+        members.forEach((id, ni) => {
+          const t = members.length > 1 ? ni / (members.length - 1) : 0.5;
+          const angle = spokeAngle + (t - 0.5) * spread;
+          const radius = 60 + ni * 25;
+          graph.setNodeAttribute(id, "x", Math.cos(angle) * radius);
+          graph.setNodeAttribute(id, "y", Math.sin(angle) * radius);
+        });
+      });
+    }
+
+    // Grid by Group: groups in a grid, nodes within each group in a mini-grid
+    function layoutGridByGroup(graph) {
+      const groups = {};
+      graph.forEachNode((id, attrs) => {
+        const mainAttrs = graphInstance.getNodeAttributes(id);
+        const g = (mainAttrs._groups || [mainAttrs._group || "unknown"])[0];
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(id);
+      });
+
+      const groupNames = Object.keys(groups).sort();
+      const cols = Math.ceil(Math.sqrt(groupNames.length));
+      const cellSize = 200;
+
+      groupNames.forEach((g, gi) => {
+        const gRow = Math.floor(gi / cols);
+        const gCol = gi % cols;
+        const basex = gCol * cellSize;
+        const basey = gRow * cellSize;
+        const members = groups[g];
+        const innerCols = Math.ceil(Math.sqrt(members.length));
+        const spacing = cellSize / (innerCols + 1);
+
+        members.forEach((id, ni) => {
+          const nRow = Math.floor(ni / innerCols);
+          const nCol = ni % innerCols;
+          graph.setNodeAttribute(id, "x", basex + (nCol + 0.5) * spacing);
+          graph.setNodeAttribute(id, "y", basey + (nRow + 0.5) * spacing);
+        });
+      });
+    }
+
     // ---- Re-layout visible nodes ----
 
     // Store original positions so we can reset
@@ -827,7 +1372,16 @@
 
       const btn = document.getElementById("tighten-btn");
       btn.disabled = true;
-      showProgress("Tightening layout...");
+      const method = document.getElementById("tighten-method").value;
+      const methodNames = {
+        "forceatlas2": "ForceAtlas2",
+        "group-attract": "Group-Attract",
+        "fruchterman": "Fruchterman-Reingold",
+        "circular": "Circular",
+        "radial": "Radial",
+        "grid": "Grid",
+      };
+      showProgress(`${methodNames[method] || method}...`);
       // Yield so browser paints the overlay before layout blocks the thread
       await new Promise(r => requestAnimationFrame(r));
 
@@ -849,12 +1403,35 @@
         }
       });
 
-      // Run layout on the subgraph with configurable intensity
       const intensity = parseInt(document.getElementById("tighten-intensity").value) || 4;
       const tightenIter = 100 * intensity;
-      await runForceAtlas2(tempGraph, tightenIter, (pct) => {
-        updateProgress(pct, `Tightening ${intensity}x... ${pct}%`);
-      });
+
+      switch (method) {
+        case "forceatlas2":
+          await runForceAtlas2(tempGraph, tightenIter, (pct) => {
+            updateProgress(pct, `ForceAtlas2 ${intensity}x... ${pct}%`);
+          });
+          break;
+        case "group-attract":
+          await runGroupAttract(tempGraph, tightenIter, (pct) => {
+            updateProgress(pct, `Group-Attract ${intensity}x... ${pct}%`);
+          });
+          break;
+        case "fruchterman":
+          await runFruchtermanReingold(tempGraph, tightenIter, (pct) => {
+            updateProgress(pct, `Fruchterman-Reingold ${intensity}x... ${pct}%`);
+          });
+          break;
+        case "circular":
+          layoutCircularByGroup(tempGraph);
+          break;
+        case "radial":
+          layoutRadialByGroup(tempGraph);
+          break;
+        case "grid":
+          layoutGridByGroup(tempGraph);
+          break;
+      }
 
       // Apply new positions back to the main graph
       tempGraph.forEachNode((node, attrs) => {
@@ -917,7 +1494,11 @@
         hiddenEdgeTypes.clear();
         highlightTensions = false;
         focusedNeighborhood = null;
+        focusDepth = 1;
+        focusedSet = null;
+        exitPathMode();
         document.getElementById("tensions-btn").classList.remove("active");
+        document.getElementById("focus-btn").textContent = "Focus";
         document.getElementById("search").value = "";
         hideDetail();
         sigmaInstance.refresh();
@@ -1017,15 +1598,36 @@
 
           if (data.hidden) { res.hidden = true; return res; }
 
-          // Neighborhood focus mode
-          if (focusedNeighborhood) {
+          // Heat map mode: override base color by recency
+          if (heatMode) {
+            res.color = getHeatColor(data._updated_at);
+          }
+
+          // Path mode
+          if (pathNodes.size > 0) {
+            if (pathNodes.has(node)) {
+              const isEndpoint = node === pathSource || node === pathTarget;
+              res.color = isEndpoint ? "#06b6d4" : "#0ea5e9";
+              res.size = (data.size || 4) * (isEndpoint ? 2.2 : 1.6);
+              res.zIndex = 3;
+              res.highlighted = true;
+            } else {
+              res.color = dimColor(res.color || "#6b7280", 0.12);
+              res.size = (data.size || 4) * 0.4;
+              res.zIndex = 0;
+            }
+            return res;
+          }
+
+          // Neighborhood focus mode (n-hop)
+          if (focusedNeighborhood && focusedSet) {
             const isCenter = node === focusedNeighborhood;
-            const isNeighbor = graphInstance.hasEdge(node, focusedNeighborhood) || graphInstance.hasEdge(focusedNeighborhood, node);
+            const inSet = focusedSet.has(node);
             if (isCenter) {
               res.size = (data.size || 4) * 2;
               res.zIndex = 3;
               res.highlighted = true;
-            } else if (isNeighbor) {
+            } else if (inSet) {
               res.size = (data.size || 4) * 1.3;
               res.zIndex = 2;
             } else {
@@ -1034,19 +1636,22 @@
             return res;
           }
 
-          // TENSION highlight mode
+          // TENSION / NEAR_MISS highlight mode
           if (highlightTensions) {
-            const isTensionNode = graphInstance.edges(node).some(e => {
-              const attrs = graphInstance.getEdgeAttributes(e);
-              return attrs._relType === "TENSION";
+            let tensionType = null;
+            graphInstance.edges(node).some(e => {
+              const a = graphInstance.getEdgeAttributes(e);
+              if (a._relType === "TENSION") { tensionType = "TENSION"; return true; }
+              if (a._relType === "NEAR_MISS") { tensionType = tensionType || "NEAR_MISS"; }
+              return false;
             });
-            if (isTensionNode) {
-              res.color = "#ef4444";
+            if (tensionType) {
+              res.color = tensionType === "TENSION" ? "#ef4444" : "#f59e0b";
               res.size = (data.size || 4) * 2;
               res.zIndex = 3;
               res.highlighted = true;
             } else {
-              res.color = dimColor(data.color || "#6b7280", 0.15);
+              res.color = dimColor(res.color || "#6b7280", 0.15);
               res.size = (data.size || 4) * 0.5;
               res.zIndex = 0;
             }
@@ -1066,7 +1671,7 @@
               res.size = (data.size || 4) * 0.9;
               res.zIndex = 2;
             } else {
-              res.color = dimColor(data.color || "#6b7280", 0.15);
+              res.color = dimColor(res.color || "#6b7280", 0.15);
               res.size = (data.size || 4) * 0.5;
               res.zIndex = 0;
             }
@@ -1083,7 +1688,7 @@
               res.size = (data.size || 4) * 1.3;
               res.zIndex = 2;
             } else {
-              res.color = dimColor(data.color || "#6b7280", 0.2);
+              res.color = dimColor(res.color || "#6b7280", 0.2);
               res.size = (data.size || 4) * 0.5;
               res.zIndex = 0;
             }
@@ -1100,7 +1705,7 @@
               res.size = (data.size || 4) * 1.2;
               res.zIndex = 2;
             } else {
-              res.color = dimColor(data.color || "#6b7280", 0.3);
+              res.color = dimColor(res.color || "#6b7280", 0.3);
               res.size = (data.size || 4) * 0.7;
               res.zIndex = 0;
             }
@@ -1120,14 +1725,32 @@
             return res;
           }
 
-          // Neighborhood focus mode
-          if (focusedNeighborhood) {
-            if (source === focusedNeighborhood || target === focusedNeighborhood) {
-              res.color = brightenColor(data.color || "#2a2a3a", 2);
-              res.size = Math.max(2, (data.size || 0.5) * 3);
-              res.zIndex = 2;
+          // Path mode
+          if (pathNodes.size > 0) {
+            if (pathEdges.has(edge)) {
+              res.color = "#06b6d4";
+              res.size = 4;
+              res.zIndex = 10;
               res.label = data._relType || "";
               res.forceLabel = true;
+            } else {
+              res.color = dimColor(data.color || "#1a1a2a", 0.05);
+              res.size = 0.15;
+              res.zIndex = 0;
+            }
+            return res;
+          }
+
+          // Neighborhood focus mode (n-hop)
+          if (focusedNeighborhood && focusedSet) {
+            if (focusedSet.has(source) && focusedSet.has(target)) {
+              // Edges directly connected to center get brighter treatment
+              const touchesCenter = source === focusedNeighborhood || target === focusedNeighborhood;
+              res.color = brightenColor(data.color || "#2a2a3a", touchesCenter ? 2 : 1.5);
+              res.size = Math.max(2, (data.size || 0.5) * (touchesCenter ? 3 : 2));
+              res.zIndex = touchesCenter ? 2 : 1;
+              res.label = data._relType || "";
+              res.forceLabel = touchesCenter;
             } else {
               res.hidden = true;
             }
@@ -1140,10 +1763,10 @@
             return res;
           }
 
-          // TENSION highlight mode
+          // TENSION / NEAR_MISS highlight mode
           if (highlightTensions) {
-            if (data._relType === "TENSION") {
-              res.color = "#ef4444";
+            if (data._relType === "TENSION" || data._relType === "NEAR_MISS") {
+              res.color = data._relType === "TENSION" ? "#ef4444" : "#f59e0b";
               res.size = 4;
               res.zIndex = 10;
               res.label = data._relType || "";
@@ -1259,6 +1882,36 @@
       // ---- Events ----
 
       sigmaInstance.on("clickNode", ({ node }) => {
+        // Path mode: Shift+click or path button active
+        if (pathMode || shiftHeld) {
+          if (!pathMode) enterPathMode();
+
+          if (!pathSource) {
+            pathSource = node;
+            setPathStatus(`Source: <strong>${node}</strong> — <span class="path-hint">click target node...</span>`);
+            sigmaInstance.refresh();
+          } else if (!pathTarget) {
+            pathTarget = node;
+            const result = findShortestPath(graphInstance, pathSource, pathTarget);
+            if (result) {
+              pathNodes = new Set(result.nodes);
+              pathEdges = new Set(result.edges);
+              setPathStatus(`<span class="path-length">${result.nodes.length} nodes, ${result.edges.length} hops</span> — <span class="path-hint">Esc to clear</span>`);
+              showPathInDetail(result);
+            } else {
+              setPathStatus(`<span style="color:#ef4444">No path found</span> between ${pathSource} and ${pathTarget} — <span class="path-hint">Esc to clear</span>`);
+            }
+            sigmaInstance.refresh();
+          } else {
+            // Third click: restart with new source
+            clearPath();
+            pathSource = node;
+            setPathStatus(`Source: <strong>${node}</strong> — <span class="path-hint">click target node...</span>`);
+            sigmaInstance.refresh();
+          }
+          return;
+        }
+
         selectedNode = node;
         showDetail(node);
         nudgeCamera();
@@ -1266,7 +1919,17 @@
 
       sigmaInstance.on("doubleClickNode", ({ node, event }) => {
         event.preventSigmaDefault();
-        focusedNeighborhood = focusedNeighborhood === node ? null : node;
+        if (focusedNeighborhood === node) {
+          focusedNeighborhood = null;
+          focusDepth = 1;
+          focusedSet = null;
+          document.getElementById("focus-btn").textContent = "Focus";
+        } else {
+          focusedNeighborhood = node;
+          focusDepth = 1;
+          updateFocusedSet();
+          document.getElementById("focus-btn").textContent = "Focus (1)";
+        }
         selectedNode = focusedNeighborhood ? node : null;
         if (focusedNeighborhood) showDetail(node);
         else hideDetail();
@@ -1274,8 +1937,12 @@
       });
 
       sigmaInstance.on("clickStage", () => {
+        if (pathNodes.size > 0) return; // Don't clear path on stage click
         selectedNode = null;
         focusedNeighborhood = null;
+        focusDepth = 1;
+        focusedSet = null;
+        document.getElementById("focus-btn").textContent = "Focus";
         hideDetail();
         nudgeCamera();
       });
@@ -1341,10 +2008,39 @@
         document.getElementById("tensions-btn").classList.toggle("active", highlightTensions);
         sigmaInstance.refresh();
       });
+      document.getElementById("heat-btn").addEventListener("click", () => {
+        heatMode = !heatMode;
+        document.getElementById("heat-btn").classList.toggle("active", heatMode);
+        // Show/hide heat legend
+        document.getElementById("heat-legend").style.display = heatMode ? "block" : "none";
+        sigmaInstance.refresh();
+      });
       document.getElementById("focus-btn").addEventListener("click", () => {
         if (!selectedNode) return;
-        focusedNeighborhood = focusedNeighborhood === selectedNode ? null : selectedNode;
+        const btn = document.getElementById("focus-btn");
+        if (!focusedNeighborhood) {
+          // Enter focus mode at depth 1
+          focusedNeighborhood = selectedNode;
+          focusDepth = 1;
+          updateFocusedSet();
+          btn.textContent = "Focus (1)";
+        } else if (focusedNeighborhood === selectedNode && focusDepth < 3) {
+          // Cycle depth up
+          focusDepth++;
+          updateFocusedSet();
+          btn.textContent = `Focus (${focusDepth})`;
+        } else {
+          // Turn off focus (depth 3 → off, or different node selected)
+          focusedNeighborhood = null;
+          focusDepth = 1;
+          focusedSet = null;
+          btn.textContent = "Focus";
+        }
         sigmaInstance.refresh();
+      });
+      document.getElementById("path-btn").addEventListener("click", () => {
+        if (pathMode) exitPathMode();
+        else enterPathMode();
       });
 
       // Keyboard shortcuts
@@ -1359,7 +2055,11 @@
           hiddenEdgeTypes.clear();
           highlightTensions = false;
           focusedNeighborhood = null;
+          focusDepth = 1;
+          focusedSet = null;
+          exitPathMode();
           document.getElementById("tensions-btn").classList.remove("active");
+          document.getElementById("focus-btn").textContent = "Focus";
           restoreOriginalPositions();
           hideDetail();
           // Reset legend dimming
@@ -1373,6 +2073,11 @@
           searchInput.focus();
         }
       });
+
+      // Track Shift key for path mode (Shift+click)
+      document.addEventListener("keydown", (e) => { if (e.key === "Shift") shiftHeld = true; });
+      document.addEventListener("keyup", (e) => { if (e.key === "Shift") shiftHeld = false; });
+      window.addEventListener("blur", () => { shiftHeld = false; }); // Reset on window blur
 
       // Hide loading
       hideProgress();
@@ -1446,7 +2151,10 @@
         el.addEventListener("click", () => {
           const targetNode = el.dataset.node;
           selectedNode = targetNode;
-          if (focusedNeighborhood) focusedNeighborhood = targetNode;
+          if (focusedNeighborhood) {
+            focusedNeighborhood = targetNode;
+            updateFocusedSet();
+          }
           showDetail(targetNode);
 
           const targetAttrs = graphInstance.getNodeAttributes(targetNode);
