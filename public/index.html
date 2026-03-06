@@ -1794,6 +1794,9 @@
             return res;
           }
 
+          // Default: hide edge labels (shown only on hover/select/special modes)
+          res.label = "";
+
           const active = selectedNode || hoveredNode;
           if (active) {
             if (source === active || target === active) {
