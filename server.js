@@ -97,6 +97,10 @@ async function fetchGraph() {
       properties: JSON.stringify(allProps),
       created_at: allProps.created_at || "",
       updated_at: allProps.updated_at || "",
+      access_count: allProps._access_count || 0,
+      search_hit_count: allProps._search_hit_count || 0,
+      traversal_count: allProps._traversal_count || 0,
+      last_accessed: allProps._last_accessed || "",
     });
   }
 
