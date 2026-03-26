@@ -148,6 +148,28 @@ app.get("/api/graph", async (_req, res) => {
   }
 });
 
+// Graph statistics endpoint — shows node/edge distribution, hub nodes, and recent activity.
+// Added 2026-03-26. Test with: curl localhost:3333/api/stats
+app.get("/api/stats", async (_req, res) => {
+  try {
+    const [nodesByChannel, edgesByType, topConnected, recentNodes] = await Promise.all([
+      graph.query(`MATCH (n) WHERE n.channel IS NOT NULL RETURN n.channel AS channel, count(n) AS count ORDER BY count DESC`),
+      graph.query(`MATCH ()-[r]->() RETURN type(r) AS type, count(r) AS count ORDER BY count DESC`),
+      graph.query(`MATCH (n)-[r]-() WHERE n.\`${NAME_PROP}\` IS NOT NULL RETURN n.\`${NAME_PROP}\` AS name, count(r) AS edges ORDER BY edges DESC LIMIT 20`),
+      graph.query(`MATCH (n) WHERE n.updated_at IS NOT NULL RETURN n.\`${NAME_PROP}\` AS name, n.channel AS channel, n.updated_at AS updated ORDER BY n.updated_at DESC LIMIT 20`),
+    ]);
+    res.json({
+      nodes_by_channel: (nodesByChannel.data || []).map(r => ({ channel: r.channel, count: r.count })),
+      edges_by_type: (edgesByType.data || []).map(r => ({ type: r.type, count: r.count })),
+      top_connected: (topConnected.data || []).map(r => ({ name: r.name, edges: r.edges })),
+      recent_nodes: (recentNodes.data || []).map(r => ({ name: r.name, channel: r.channel, updated: r.updated })),
+    });
+  } catch (err) {
+    console.error("Failed to fetch stats:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 async function main() {
   await connectDB();
   app.listen(PORT, () => {
